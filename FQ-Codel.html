@@ -6,7 +6,7 @@
         <head><title>FQ_CoDel &mdash; SFQ on Steroids [LWN.net]</title>
         <meta HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
 
-           <p>November 21, 2012</p>
+           <p>November 26, 2012</p>
            <p><i>Author list TBD</i></p>
 
 <h2>Introduction</h2>
@@ -51,7 +51,7 @@ The remainder of this article addresses this question as follows:
 dropping that might be required.
 To this end, an example SFQ data structure might look as follows:
 
-<p><img src="SFQ.png" width="50%" alt="SFQ.png">
+<p><img src="SFQ.png" width="33%" alt="SFQ.png">
 
 <p>The horizontal row of boxes labeled A, B, C, and&nbsp;D represent
 a hash table of queues.
@@ -155,7 +155,7 @@ Of course, this combining does require significant rework of SFQ, but
 fortunately Eric Dumazet was up to the job.
 A rough schematic of the result is shown below:
 
-<p><img src="FQ-CoDel.png" width="45%" alt="FQ-CoDel.png">
+<p><img src="FQ-CoDel.png" width="30%" alt="FQ-CoDel.png">
 
 <p>The most significant attributes of SFQ remain, namely that packets
 are hashed into multiple buckets.
@@ -280,6 +280,11 @@ The graph to the right uses FQ-CoDel, while that to the left does not.
 <p><img src="data.2012.11.23a/plots/nofq.svg" width="45%" alt="data.2012.11.23a/plots/nofq.svg">
 <img src="data.2012.11.23a/plots/fq.svg" width="45%" alt="data.2012.11.23a/plots/fq.svg">
 
+<p>Here, &ldquo;BE&rdquo; is best-effort (no marking), &ldquo;BK&rdquo;
+is bulk (class selector 1 (CS1) marking), &ldquo;EF&rdquo; is
+expedited forwarding, and &ldquo;CS5&rdquo; is class selector 5
+(which is higher precedence/priority than CS1).
+
 <p>As you can see, FQ-CoDel is extremely effective, improving the
 low-bandwidth latency by roughly a factor of four, with no noticeable
 degradation in throughput for the uploads and downloads.
@@ -403,8 +408,7 @@ Why the jumps in throughput near the beginnings and ends of the tests?
 
 
 </p><p><b>Answer</b>:
-Good question.
-This is being investigated.
+This is likely due to streams starting and finishing early.
 
 
 </p><p><a href="#Quick%20Quiz%205"><b>Back to Quick Quiz 5</b>.</a>
