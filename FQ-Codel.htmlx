@@ -9,26 +9,39 @@
 
 <h2>Introduction</h2>
 
-<p>The
-<a href="http://lwn.net/Articles/496509/">CoDel queueing algorithm</a>
-has been put forward as a way of addressing the
-<a href="http://lwn.net/Articles/419714/">bufferbloat problem</a>,
-and Eric Dumazet and Dave Taht have implemented this in the Linux kernel as
-<code>net/sched/sch_codel.c</code>, which appeared in v3.5.
+<p><a href="http://lwn.net/Articles/419714/">Bufferbloat</a>
+severely degrades Internet response times, particularly for low-bandwidth
+traffic such as
+<a href="http://en.wikipedia.org/wiki/Voice_over_IP">voice-over-IP (VOIP)</a>.
+Although unintelligible VOIP connections are perhaps the most familiar
+symptom of bufferbloat,
+it also impedes other important types of traffic, including
+<a href="http://en.wikipedia.org/wiki/Domain_Name_System">DNS</a> lookups,
+<a href="http://en.wikipedia.org/wiki/Dhcp">DHCP</a> packets,
+<a href="http://en.wikipedia.org/wiki/Address_Resolution_Protocol">ARP</a>
+packets, and 
+<a href="http://en.wikipedia.org/wiki/Routing">routing</a> packets.
+Because timely delivery of these packets is critical to Internet
+operation for all types of workloads, bufferbloat affects everyone.
+Internet is literally drowning in its own buffers.
+
+<p>The <a href="http://lwn.net/Articles/496509/">CoDel queueing algorithm</a>
+is quite effective against bufferbloat,
+and Eric Dumazet and Dave Taht have implemented it in the v3.5 Linux kernel as
+<code>net/sched/sch_codel.c</code>.
 However, in his
 <a href="http://recordings.conf.meetecho.com/Recordings/watch.jsp?recording=IETF84_TSVAREA&amp;chapter=part_3">IETF presentation</a>
 reporting on Kathleen Nichols's and his work,
 Van Jacobson recommends use of FQ-CoDel, which combines
 <a href="http://www.rdrop.com/users/paulmck/scalability/paper/sfq.2002.06.04.pdf">stochastic fairness queueing (SFQ)</a>
 with CoDel.
-Eric and Dave implemented this as well, with
-<code>net/sched/sch_fq_codel.c</code> also appearing in v3.5.
+Eric and Dave also implemented FQ-CoDel, with
+<code>net/sched/sch_fq_codel.c</code> appearing in v3.5.
 Of course, Alexey Kuznetsov implemented SFQ itself as
 <code>net/sched/sch_sfq.c</code> back in the 1990s.
 
-<p>This raises the question of how FQ-CoDel differs from SFQ on
-the one hand and from pure CoDel on the other, which this article
-attempts to answer.
+<p>So how does FQ-CoDel differ from SFQ on
+the one hand and from pure CoDel on the other?
 The remainder of this article addresses this question as follows:
 
 <ol>
@@ -139,17 +152,9 @@ Roughly speaking, this is done by preferentially dropping
 packets that sit in the queue for longer time periods.
 
 <p>Nevertheless, CoDel still maintains a single queue, so that low-bandwidth
-<a href="http://en.wikipedia.org/wiki/Voice_over_IP">voice-over-IP (VOIP)</a>
-packets could easily get stuck behind higher-bandwidth
+packets (such as those from VOIP sessions)
+could easily get stuck behind higher-bandwidth
 flows such as video downloads.
-This same risk is incurred by other types of packets, including
-<a href="http://en.wikipedia.org/wiki/Domain_Name_System">DNS</a> lookups,
-<a href="http://en.wikipedia.org/wiki/Dhcp">DHCP</a> packets,
-<a href="http://en.wikipedia.org/wiki/Address_Resolution_Protocol">ARP</a>
-packets, and 
-<a href="http://en.wikipedia.org/wiki/Routing">routing</a> packets,
-timely delivery of which is critical to the operation of Internet for
-all types of workloads.
 Therefore, what we would like to allow the low-bandwidth time-sensitive
 VOIP packets to jump ahead of the video download, but not to the extent
 that the video download is in any danger of starvation&mdash;or even in
