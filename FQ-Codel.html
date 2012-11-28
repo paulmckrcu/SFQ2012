@@ -3,7 +3,7 @@
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
         "http://www.w3.org/TR/html4/loose.dtd">
         <html>
-        <head><title>FQ_CoDel &mdash; SFQ on Steroids [LWN.net]</title>
+        <head><title>FQ-CoDel &mdash; SFQ on Steroids [LWN.net]</title>
         <meta HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
 
            <p>November 26, 2012</p>
@@ -147,6 +147,10 @@ that point.
 Roughly speaking, this is done by preferentially dropping
 packets that sit in the queue for longer time periods.
 
+<p><a name="Quick Quiz 2"><b>Quick Quiz 2</b>:</a>
+What does the FQ-CoDel acronym expand to?
+<br><a href="#qq2answer">Answer</a>
+
 <p>Nevertheless, CoDel still maintains a single queue, so that low-bandwidth
 packets (such as those from VOIP sessions)
 could easily get stuck behind higher-bandwidth
@@ -177,31 +181,39 @@ green arrow referencing bucket&nbsp;D.
 The second list contains all other non-empty buckets, in this case
 only bucket&nbsp;C, which with high probability contains &ldquo;hog&rdquo; flows.
 
-<p><a name="Quick Quiz 2"><b>Quick Quiz 2</b>:</a>
+<p><a name="Quick Quiz 3"><b>Quick Quiz 3</b>:</a>
 But mightn't bucket&nbsp;C instead just contain a bunch of packets from
 a number of unlucky VOIP sessions?
 Wouldn't that be needlessly inflicting dropouts on the hapless VOIP users?
-<br><a href="#qq2answer">Answer</a>
-
-<p><a name="Quick Quiz 3"><b>Quick Quiz 3</b>:</a>
-OK, but if this session segregation is so valuable, why didn't the original
-SFQ implement it?
 <br><a href="#qq3answer">Answer</a>
 
+<p><a name="Quick Quiz 4"><b>Quick Quiz 4</b>:</a>
+OK, but if this session segregation is so valuable, why didn't the original
+SFQ implement it?
+<br><a href="#qq4answer">Answer</a>
+
 <p>FQ-CoDel operates by dequeueing from each low-bandwidth bucket,
-dequeueing from one of the &ldquo;hog&rdquo; bucket, and repeating.
-If a given low-bandwidth bucket accumulates too many packets, it is
+unless there are no low-bandwidth buckets, in which case it dequeues
+from the first &ldquo;hog&rdquo; bucket.
+If a given bucket accumulates too many packets, it is
 relegated to the end of the &ldquo;hog&rdquo; list.
 If a bucket from either list becomes empty, it is removed from whichever
-list it is on.
-The first packet arriving at an empty bucket is initially classified
+list it is on, with one very important exception.
+Any low-bandwidth bucket that becomes empty is added to the end of
+the &ldquo;hog&rdquo; list.
+This prevents starvation of the &ldquo;hogs&rdquo;: if there was an
+unending random drizzle of packets, eventually all the buckets would
+end up on the &ldquo;hog&rdquo; list, which would force the &ldquo;hog&rdquo;
+list to be scanned, again avoiding starvation.
+
+<p>The first packet arriving at an empty bucket is initially classified
 as a low-bandwidth session and is thus placed on the low-bandwidth list
 of buckets.
 
-<p><a name="Quick Quiz 4"><b>Quick Quiz 4</b>:</a>
+<p><a name="Quick Quiz 5"><b>Quick Quiz 5</b>:</a>
 Doesn't this initial misclassification unfairly penalize competing
 low-bandwidth time-sensitive flows?
-<br><a href="#qq4answer">Answer</a>
+<br><a href="#qq5answer">Answer</a>
 
 <p>Another key change is that FQ-CoDel drops packets from the head of
 the queue, rather than from the tail, as has been the tradition,
@@ -259,6 +271,14 @@ CoDel is that packet drops are normally reasonably infrequent.
 Instead, a hash function is selected randomly from a set of about 4 billion
 possible hash functions at boot time.
 
+<p>The overall effect is that FQ-CoDel gives users a choice between
+low latency and high reliability on the one hand and high bandwidth
+on the other.
+Low-bandwidth sessions with high probability enjoy low latency and low
+packet-drop rates (thus high reliabilty), while &ldquo;hog&rdquo;
+sessions incur increased latency and higher packet-drop rates in exchange
+for greater bandwidth.
+
 <h2><a name="Configuring FQ-CoDel">Configuring FQ-CoDel</a></h2>
 
 <p>Because FQ-CoDel is built on top of a number of Linux-kernel networking
@@ -299,13 +319,13 @@ and then the uploads start.
 In contrast, the FQ-CoDel latency is not affected much by the throughput,
 as is desired.
 
-<p><a name="Quick Quiz 5"><b>Quick Quiz 5</b>:</a>
-Why the jumps in throughput near the beginnings and ends of the tests?
-<br><a href="#qq5answer">Answer</a>
-
 <p><a name="Quick Quiz 6"><b>Quick Quiz 6</b>:</a>
-Why the smaller per-session spikes in throughput during the tests?
+Why the jumps in throughput near the beginnings and ends of the tests?
 <br><a href="#qq6answer">Answer</a>
+
+<p><a name="Quick Quiz 7"><b>Quick Quiz 7</b>:</a>
+Why the smaller per-session spikes in throughput during the tests?
+<br><a href="#qq7answer">Answer</a>
 
 <h2><a name="Summary">Summary</a></h2>
 
@@ -363,6 +383,30 @@ Hey, I never promised you that life would be easy!  ;-)
 
 <a name="qq2answer"></a>
 <p><b>Quick Quiz 2</b>:
+What does the FQ-CoDel acronym expand to?
+
+
+</p><p><b>Answer</b>:
+There are some differences of opinion on this.
+The comment header in <code>net/sched/sch_fq_codel.c</code> says
+&ldquo;Fair Queue CoDel&rdquo; (presumably by analogy to SFQ's
+expansion of &ldquo;Stochastic Fairness Queueing&rdquo;),
+and &ldquo;CoDel&rdquo; is generally
+agreed to expand to &ldquo;controlled delay&rdquo;.
+However, some prefer &ldquo;Flow Queue Controlled Delay&rdquo;
+and still others prefer to prepend a silent and invisible "S",
+expanding to &ldquo;Stochastic Flow Queue Controlled Delay&rdquo; or
+&ldquo;Smart Flow Queue Controlled Delay&rdquo;.
+No doubt additional expansions will appear in the fullness of time.
+
+<p>In the meantime, this article focuses on the concepts, implementation,
+and performance, leaving naming debates to others.
+
+
+</p><p><a href="#Quick%20Quiz%202"><b>Back to Quick Quiz 2</b>.</a>
+
+<a name="qq3answer"></a>
+<p><b>Quick Quiz 3</b>:
 But mightn't bucket&nbsp;C instead just contain a bunch of packets from
 a number of unlucky VOIP sessions?
 Wouldn't that be needlessly inflicting dropouts on the hapless VOIP users?
@@ -377,10 +421,10 @@ the probabilty that (say) 100 VOIP sessions will all hash to the
 same bucket is something like ten to the power of minus 300.
 
 
-</p><p><a href="#Quick%20Quiz%202"><b>Back to Quick Quiz 2</b>.</a>
+</p><p><a href="#Quick%20Quiz%203"><b>Back to Quick Quiz 3</b>.</a>
 
-<a name="qq3answer"></a>
-<p><b>Quick Quiz 3</b>:
+<a name="qq4answer"></a>
+<p><b>Quick Quiz 4</b>:
 OK, but if this session segregation is so valuable, why didn't the original
 SFQ implement it?
 
@@ -391,10 +435,10 @@ Two reasons: (1)&nbsp;I didn't think of it at the time, and
 68000 CPUs that I was using at the time.
 
 
-</p><p><a href="#Quick%20Quiz%203"><b>Back to Quick Quiz 3</b>.</a>
+</p><p><a href="#Quick%20Quiz%204"><b>Back to Quick Quiz 4</b>.</a>
 
-<a name="qq4answer"></a>
-<p><b>Quick Quiz 4</b>:
+<a name="qq5answer"></a>
+<p><b>Quick Quiz 5</b>:
 Doesn't this initial misclassification unfairly penalize competing
 low-bandwidth time-sensitive flows?
 
@@ -403,12 +447,14 @@ low-bandwidth time-sensitive flows?
 Again, indeed it might.
 However, a &ldquo;hog&rdquo; flow is likely to persist for some time, so the
 fraction of time that it spends misclassified is usually insignificant.
+Furthermore, TCP-based &ldquo;&rdquo; flows begin in slow-start mode,
+so the actually do act like low-bandwidth flows for awhile.
 
 
-</p><p><a href="#Quick%20Quiz%204"><b>Back to Quick Quiz 4</b>.</a>
+</p><p><a href="#Quick%20Quiz%205"><b>Back to Quick Quiz 5</b>.</a>
 
-<a name="qq5answer"></a>
-<p><b>Quick Quiz 5</b>:
+<a name="qq6answer"></a>
+<p><b>Quick Quiz 6</b>:
 Why the jumps in throughput near the beginnings and ends of the tests?
 
 
@@ -416,10 +462,10 @@ Why the jumps in throughput near the beginnings and ends of the tests?
 This is likely due to streams starting and finishing early.
 
 
-</p><p><a href="#Quick%20Quiz%205"><b>Back to Quick Quiz 5</b>.</a>
+</p><p><a href="#Quick%20Quiz%206"><b>Back to Quick Quiz 6</b>.</a>
 
-<a name="qq6answer"></a>
-<p><b>Quick Quiz 6</b>:
+<a name="qq7answer"></a>
+<p><b>Quick Quiz 7</b>:
 Why the smaller per-session spikes in throughput during the tests?
 
 
@@ -432,7 +478,7 @@ Note that the overall average throughput, indicated by the black trace,
 does not vary much, so the aggregate bandwidth is quite steady.
 
 
-</p><p><a href="#Quick%20Quiz%206"><b>Back to Quick Quiz 6</b>.</a>
+</p><p><a href="#Quick%20Quiz%207"><b>Back to Quick Quiz 7</b>.</a>
 
 
 </body></html>
