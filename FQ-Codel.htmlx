@@ -31,7 +31,7 @@ the <a href="http://lwn.net/Articles/496509/">CoDel queueing algorithm</a>,
 as noted on page 9 of the Internet Society's
 <a href="http://www.internetsociety.org/doc/bandwidth-management-internet-society-technology-roundtable-series">Bandwidth Management Technology Roundtable Series</a>.
 And just as fortunately,
-Eric Dumazet's and Dave Taht's Codel implementation appeared in v3.5 as
+Eric Dumazet's and Dave T&auml;ht's Codel implementation appeared in v3.5 as
 <code>net/sched/sch_codel.c</code>.
 However, in his
 <a href="http://recordings.conf.meetecho.com/Recordings/watch.jsp?recording=IETF84_TSVAREA&amp;chapter=part_3">IETF presentation</a>,
@@ -379,7 +379,7 @@ If not, and if you are willing and able to do some hacking, feel free to
 try adding them to your driver, testing the result and submitting the
 patch upstream.
 Finally, there is an ongoing effort to add these functions, spearheaded
-by Dave Taht, but help is always welcome!
+by Dave T&auml;ht, but help is always welcome!
 <p>@@QQE@@
 
 <p>In addition, it is necessary to configure FQ-CoDel using the
@@ -413,7 +413,7 @@ though some adjustment may be needed for other boot-up systems.
 
 <h2><a name="Effectiveness of FQ-CoDel">Effectiveness of FQ-CoDel</a></h2>
 
-<p>To demonstrate the effectiveness of FQ-CoDel, Dave Taht and David
+<p>To demonstrate the effectiveness of FQ-CoDel, Dave T&auml;ht and David
 Woodhouse ran a test concurrently running four TCP uploads, four additional
 TCP downloads, along with four low-bandwidth workloads, three of which
 used UDP and the fourth being ICMP ping packets.
@@ -556,7 +556,21 @@ bufferbloat in today's Internet.
 
 <h1><a name="Acknowledgments">Acknowledgments</a></h1>
 
-<p>TBD.
+<p>TBD.  <!-- Including all potential authors, trim when author list done.
+We all owe thanks to Kathleen Nichols and Van Jacobson for CoDel,
+and to Eric Dumazet and Dave T&auml;ht for FQ-CoDel and for the Linux-kernel
+implementation of both CoDel and FQ-CoDel.
+I am grateful to Dave Siemon for his
+(see <a href="http://git.coverfire.com/?p=linux-qos-scripts.git;a=blob;f=src-3tos.sh;hb=HEAD">script</a>
+demonstrating FQ-CoDel,
+and to Jim Gettys, Dave T&auml;ht, Kathleen Nichols, Bob Briscoe,
+Andrew McGregor, Toke H&oslash;iland-J&oslash;rgensen, David P. Reed,
+Rick Jones, David Lang, Michael Richardson, Greg White, Jonathan Morten,
+Eric Dumazet, and Richard Brown for many insightful discussions.
+Dave T&auml;ht in particular encouraged me to start this article in the first
+place, and provided much-needed encouragement along the way.
+Finally, I thank Jim Wasko for his support of this effort.
+-->
 
 <h1><a name="Legal Statement">Legal Statement</a></h1>
 
