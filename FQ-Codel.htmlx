@@ -54,7 +54,7 @@ The remainder of this article addresses this question as follows:
 <li>	<a href="#Configuring FQ-CoDel">Configuring FQ-CoDel</a>.
 <li>	<a href="#Effectiveness of FQ-CoDel">Effectiveness of FQ-CoDel</a>.
 <li>	<a href="#Remaining Challenges">Remaining Challenges</a>.
-<li>	<a href="#Summary">Summary</a>.
+<li>	<a href="#Summary and Advice">Summary and Advice</a>.
 </ol>
 
 <p>This is of course followed by the
@@ -121,7 +121,8 @@ detail are referred to the
 <a href="http://www.rdrop.com/users/paulmck/scalability/paper/sfq.2002.06.04.pdf">paper</a>.
 
 <p>Of course, it is possible that a low-bandwidth session will, though
-sheer bad luck, happen to hash to the same bucket as a &ldquo;hog&rdquo; session.
+sheer bad luck, happen to hash to the same bucket as a
+&ldquo;hog&rdquo; session.
 In order to prevent this from becoming permanent bad luck,
 SFQ allows the hash function to be periodically perturbed, in essence
 periodically reshuffling the sessions.
@@ -133,8 +134,8 @@ Nevertheless, SFQ works well enough that it is often configured as a &ldquo;leaf
 packet scheduler in the Linux kernel.
 
 <p>@@QQ@@
-But mightn't tricky protocol designers split their &ldquo;hog&rdquo; sessions over
-multiple TCP sessions?
+But mightn't tricky protocol designers split their &ldquo;hog&rdquo;
+sessions over multiple TCP sessions?
 Wouldn't that defeat SFQ's attempt to fairly allocate bottleneck link
 packet transmissions?
 <p>@@QQA@@
@@ -195,40 +196,43 @@ A rough schematic of the result is shown below:
 <p>The most significant attribute of SFQ remains, namely that packets
 are hashed into multiple buckets.
 However, each bucket contains not a first-come-first-served queue as
-is the case with SFQ, but rather a CoDel-managed queue.
+is the case with SFQ, but rather a CoDel-managed queue, which is called
+a &ldquo;flow&rdquo; to distinguish it from the straightforward
+first-come-first-serve queue used by SFQ.
 
 <p>Perhaps the next most significant change in that there are now two lists
-linking the buckets together instead of just one.
-The first list contains buckets&nbsp;A and&nbsp;D, namely the buckets
+linking the flows together instead of just one.
+The first list contains flows&nbsp;A and&nbsp;D, namely the flows
 that with high probability contain packets from low-bandwidth time-sensitive
 sessions.
-The next bucket to be dequeued from is indicated by the dash-dotted
+The next flow to be dequeued from is indicated by the dash-dotted
 green arrow referencing bucket&nbsp;D.
-The second list contains all other non-empty buckets, in this case
-only bucket&nbsp;C, which with high probability contains &ldquo;hog&rdquo; flows.
+The second list contains all other non-empty flows, in this case
+only flow&nbsp;C, which with high probability contains &ldquo;hog&rdquo;
+session.
 
 <p>@@QQ@@
-But mightn't bucket&nbsp;C instead just contain a bunch of packets from
+But mightn't flow&nbsp;C instead just contain a bunch of packets from
 a number of unlucky VOIP sessions?
 Wouldn't that be needlessly inflicting dropouts on the hapless VOIP users?
 <p>@@QQA@@
 Indeed it might.
 Which is why there are all those &ldquo;with high probability&rdquo; qualifiers
 in the description.
-However, given that FQ-CoDel uses no fewer than 1024 hash buckets,
+However, given that FQ-CoDel provides no fewer than 1024 hashed flows,
 the probabilty that (say) 100 VOIP sessions will all hash to the
-same bucket is something like ten to the power of minus 300.
+same flow is something like ten to the power of minus 300.
 Thus, the probability that at least one of the VOIP sessions will hash
-to some other bucket is very high indeed.
+to some other flow is very high indeed.
 
 <p>But what is the probability that each of the 100 VOIP sessions will get
-its own bucket?
+its own flow?
 This is given by (1023!/(924!*1024^99)) or about 0.007, which although
 much more highly probable than ten to the power of minus 300, is still
-not all that highly probable.
+not all that probable.
 
 <p>Fortunately, the probability rises sharply if we are willing to accept
-a small number of collisions.
+a few collisions.
 For example, there is about an 86% probability that no more than two
 of the 100 VOIP sessions will be involved in any given collision,
 and about a 99%
@@ -266,36 +270,72 @@ periodically perturbed, and providing a similar perturbation capability
 for FQ-CoDel is ongoing work.
 <p>@@QQE@@
 
-<p>FQ-CoDel operates by dequeueing from each low-bandwidth bucket,
-unless there are no low-bandwidth buckets, in which case it dequeues
-from the first &ldquo;hog&rdquo; bucket.
-If a given bucket accumulates too many packets, it is
-relegated to the end of the &ldquo;hog&rdquo; list.
-If a bucket from either list becomes empty, it is removed from whichever
-list it is on.
-However, any low-bandwidth bucket that becomes empty is added to the end of
-the &ldquo;hog&rdquo; list.
-This is extremely important: if there was an
-unending drizzle of random packets, eventually all the buckets would
-end up on the &ldquo;hog&rdquo; list, which would force the &ldquo;hog&rdquo;
-list to be scanned, thus avoiding hog starvation.
+<p>FQ-CoDel operates by preferentially dequeueing from the low-bandwidth
+flows on the <code>new_flows</code> list.
+If a given flow has too much traffic for too long, it is presumed to
+contain a &ldquo;hog&rdquo; session, and is thus moved to
+the <code>old_flows</code> list.
+If there are no <code>new_flows</code> flows, FQ-CoDel dequeues
+from the first flow on the <code>old_flows</code> list.
 
-<p>The first packet arriving at an empty bucket is initially classified
-as a low-bandwidth session and is thus placed on the low-bandwidth list
-of buckets.
+<p>The resulting migration of flows is shown more completely
+and precisely in the following state diagram:
+
+<p><img src="flowstate.png" width="35%" alt="flowstate.png">
+
+<p>All flows are initially empty.
+When the first packet arrives at an empty flow, that
+flow to be classified as low bandwidth, and thus added to the
+<code>new_flows</code> list in the implementation.
 
 <p>@@QQ@@
+But this means that the first packet from a &ldquo;hog&rdquo; session
+will cause that session to be placed onto <code>new_flows</code>.
 Doesn't this initial misclassification unfairly penalize competing
-low-bandwidth time-sensitive flows?
+low-bandwidth time-sensitive sessions?
 <p>@@QQA@@
 Again, indeed it might.
-However, a &ldquo;hog&rdquo; flow is likely to persist for some time, so the
+However, a &ldquo;hog&rdquo; session is likely to persist for some time, so the
 fraction of time that it spends misclassified is usually insignificant.
-Furthermore, TCP-based &ldquo;hog&rdquo; flows begin in slow-start mode,
-thus acting like low-bandwidth flows initially.
+Furthermore, TCP-based &ldquo;hog&rdquo; sessions begin in slow-start mode,
+thus acting like a low-bandwidth session initially.
 <p>@@QQE@@
 
-<p>Another key change is that FQ-CoDel drops packets from the head of
+<p>A flow on the <code>new_flows</code> list is guaranteed to
+eventually either become empty or exceed the quantum.
+If it exceeds its quantum, it will of course be moved to the
+end of the <code>old_flows</code> list.
+
+<p>@@QQ@@
+Why couldn't packets arrive at just the right rate so that the
+flow never emptied, but at the same time, the packets being
+dequeued were always recent arrivals?
+Couldn't that result in starvation of the <code>old_flows</code>?
+<p>@@QQA@@
+No, it cannot.
+The reason is that FQ-CoDel keeps dequeueing from the same flow
+until that flow either becomes empty or exceeds the quantum.
+<p>@@QQE@@
+
+<p>Interestingly enough, if a <code>new_flows</code> flow becomes
+empty, it is also moved to the end of the <code>old_flows</code> list.
+This is extremely important, as it prevents a constant drizzle of
+packets from low-bandwidth sessions from starving the
+<code>old_flows</code> list.
+Sooner or later, all flows on the <code>new_flows</code> list would
+move to the <code>old_flows</code> list, allowing the <code>old_flows</code>
+list to be serviced.
+
+<p>Once the <code>new_flows</code> list empties, the flow at the head
+of the <code>old_flows</code> list will be dequeued from until it either
+exceeds its quantum (in which case it is moved to the end of the
+<code>old_flows</code> list), or until it empties, in which case it
+is removed from the <code>old_flows</code> list, returning it to its
+initial state, namely the box labeled &ldquo;Empty&rdquo in the
+above diagram.
+
+<p>Another key aspect in which FQ-CoDel differs
+is that it drops packets from the head of
 the queue, rather than the traditional drop from the tail,
 a tradition that SFQ adhered to.
 To see the benefit of dropping from the head rather than the tail,
@@ -313,7 +353,10 @@ the network.
 This faster propagation enables the transport protocols to more
 quickly adjust their offered load, resulting in faster reduction in
 queue length, which in turn results in faster reduction in network
-round-trip time, which finally improves overall network responsiveness.
+round-trip time, which finally improves overall network responsiveness,
+as illustrated in the following diagram.
+
+<p><img src="headtaildrop.png" width="35%" alt="headtaildrop.png">
 
 <p>In addition, use of head drop instead of tail drop results in
 dropping of older packets, which is helpful in cases where faster
@@ -377,10 +420,10 @@ principles of its operation.
 
 <h2><a name="Configuring FQ-CoDel">Configuring FQ-CoDel</a></h2>
 
-<p>Because FQ-CoDel is built on top of a number of Linux-kernel networking
+<p>Because FQ-CoDel make use of a number of Linux-kernel networking
 features, it is usually not sufficient to simply enable it via
 the <code>CONFIG_NET_SCH_FQ_CODEL</code> kernel parameter.
-In addition, you network driver must be instrumented to support
+In addition, your Ethernet network driver must be instrumented to support
 packet scheduling, for example as shown in this
 <a href="smsc911x.patch">patch</a> for the SMSC911x Ethernet driver.
 This instrumentation is provided via calls to
@@ -490,7 +533,7 @@ To see this, consider a 1&nbsp;Mbit/s link, which requires more than
 12&nbsp;milliseconds to transmit a 1536-byte packet.
 Unfortunately, this time is more than double FQ-CoDel's quantum
 of 5&nbsp;milliseconds, which in turn prevents FQ-CoDel from
-distinguishing between low-bandwidth flows and &ldquo;hog&rdquo; flows.
+distinguishing between low-bandwidth and &ldquo;hog&rdquo; sessions.
 This problem might be addressed by reducing the
 <a href="http://en.wikipedia.org/wiki/Maximum_transmission_unit">MTU</a>
 or by increasing FQ-CoDel's quantum to (say) 30&nbsp;milliseconds,
@@ -573,7 +616,7 @@ deployed widely, which means that we should soon reap the benefits
 of improved VOIP sessions with minimal impact on bulk-data downloads.
 <p>@@QQE@@
 
-<h2><a name="Summary">Summary</a></h2>
+<h2><a name="Summary and Advice">Summary and Advice</a></h2>
 
 <p>FQ-CoDel combines the best of CoDel and SFQ, making a few needed
 changes along the way.
@@ -581,6 +624,32 @@ Testing thus far has shown that it works extremely well for current
 Internet traffic.
 Therefore, FQ-CoDel is an important weapon in the fight against
 bufferbloat in today's Internet.
+
+<p>So, when should you use FQ-CoDel?
+As we have seen, it is most effective when you have time-sensitive
+low-bandwidth traffic competing with high-bandwidth sessions.
+Of course, given DNS, DHCP, ARP, and routing packets, everyone has
+some low-bandwidth traffic.
+FQ CoDel can be very effective at preventing the high-bandwidth
+traffic from degrading the response time of the low-bandwidth
+traffic.
+However, in the short term, the direction of the high-bandwidth
+flows is important.
+For example, installing FQ-CoDel on your home computer would keep
+large uploads from unduly interfering with your VOIP sessions.
+However, it would not do much to help prevent such interference
+from large downloads: The offending queues would be building up
+at your ISP rather than on your home computer.
+This situation underscores the importance of applying FQ-CoDel
+or similar algorithms throughout Internet.
+
+<p>In addition, although FQ-CoDel will allocate bandwidth fairly
+among competing high-bandwidth sessions, it is not likely to
+improve the aggregate throughput.
+At some point, bigger pipes are required.
+
+<p>Again, FQ-CoDel is an important weapon in the fight against
+bufferbloat, and I very much look forward to its rapid deployment!
 
 <h1><a name="Acknowledgments">Acknowledgments</a></h1>
 
