@@ -4,7 +4,7 @@
         <head><title>FQ-CoDel &mdash; SFQ on Steroids [LWN.net]</title>
         <meta HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
 
-           <p>December 11, 2012</p>
+           <p>December 13, 2012</p>
            <p>As told to Paul E.&nbsp;McKenney by the bufferbloat list</p>
 
 <h2>Introduction</h2>
@@ -23,7 +23,7 @@ packets, and
 <a href="http://en.wikipedia.org/wiki/Routing">routing</a> packets.
 Because timely delivery of these packets is critical to Internet
 operation for all types of traffic, bufferbloat affects everyone.
-Internet is literally drowning in its own buffers.
+The Internet is literally drowning in its own buffers.
 
 <p>Fortunately, Kathleen Nichols and Van Jacobson have provided an important
 weapon in the fight against bufferbloat, namely
@@ -31,11 +31,12 @@ the <a href="http://lwn.net/Articles/496509/">CoDel queueing algorithm</a>,
 as noted on page 9 of the Internet Society's
 <a href="http://www.internetsociety.org/doc/bandwidth-management-internet-society-technology-roundtable-series">Bandwidth Management Technology Roundtable Series</a>.
 And just as fortunately,
-Eric Dumazet's and Dave T&auml;ht's Codel implementation appeared in v3.5 as
+Eric Dumazet's and Dave T&auml;ht's Codel implementation appeared in
+version 3.5 of the Linux kernel as
 <code>net/sched/sch_codel.c</code>.
 However, in his
 <a href="http://recordings.conf.meetecho.com/Recordings/watch.jsp?recording=IETF84_TSVAREA&amp;chapter=part_3">IETF presentation</a>,
-Van Jacobson recommends use of FQ-CoDel, which combines
+Van Jacobson recommends the use of FQ-CoDel, which combines
 <a href="http://www.rdrop.com/users/paulmck/scalability/paper/sfq.2002.06.04.pdf">stochastic fairness queueing (SFQ)</a>
 with CoDel.
 Eric and Dave were ahead of this game as well, and their FQ-CoDel
@@ -51,6 +52,7 @@ The remainder of this article addresses this question as follows:
 <ol>
 <li>	<a href="#SFQ Overview">SFQ Overview</a>.
 <li>	<a href="#FQ-CoDel Overview">FQ-CoDel Overview</a>.
+<li>	<a href="#CoDel Overview">CoDel Overview</a>.
 <li>	<a href="#Configuring FQ-CoDel">Configuring FQ-CoDel</a>.
 <li>	<a href="#Effectiveness of FQ-CoDel">Effectiveness of FQ-CoDel</a>.
 <li>	<a href="#Remaining Challenges">Remaining Challenges</a>.
@@ -63,14 +65,15 @@ The remainder of this article addresses this question as follows:
 <h2><a name="SFQ Overview">SFQ Overview</a></h2>
 
 <p>The purpose of SFQ is straightforward: With high probability, isolate
-&ldquo;hog&rdquo; sessions so that they bear the brunt of any packet
+&ldquo;hog&rdquo; sessions from other sessions so that the
+&ldquo;hog&rdquo; sessions bear the brunt of any packet
 dropping that might be required.
 To this end, an example SFQ data structure might look as follows:
 
 <p><img src="SFQ.png" width="33%" alt="SFQ.png">
 
 <p>The horizontal row of boxes labeled A, B, C, and&nbsp;D represent
-a hash table of queues.
+a hash table, where each hash bucket contains a queue.
 Each incoming packet is enqueued based on a hash of its
 &ldquo;quintuple&rdquo;, namely its source address, source port, destination
 address, destination port, and IP protocol
@@ -91,7 +94,7 @@ dot-dashed arrow, and the next bucket after that is A.
 <p>Each non-empty bucket is also linked into a doubly linked list containing
 all other buckets with the same number of packets.
 These lists are indicated by the dashed arrows.
-These lists are anchored off of an array, shown on the left-hand side of the
+These lists are anchored by the array shown on the left-hand side of the
 diagram.
 In this example, the buckets with one packet are A and&nbsp;D.
 The other list contains only C, which is the sole bucket having three
@@ -99,7 +102,7 @@ packets.
 
 <p>There is also an index into this array that tracks the buckets
 with the most packets.
-In the diagram, this index is represented by the arrow referencing
+In the diagram, this index is represented by the arrow pointing to
 array element&nbsp;3.
 This index is used to find queues to steal packets from when the
 SFQ overflows.
@@ -118,7 +121,7 @@ at network bottlenecks, at least for some probabilistic definition of
 <p>There clearly will be some list maintenance required as packets
 are enqueued and dequeued, and readers interested in that sort of
 detail are referred to the
-<a href="http://www.rdrop.com/users/paulmck/scalability/paper/sfq.2002.06.04.pdf">paper</a>.
+<a href="http://www.rdrop.com/users/paulmck/scalability/paper/sfq.2002.06.04.pdf">SFQ paper</a>.
 
 <p>Of course, it is possible that a low-bandwidth session will, though
 sheer bad luck, happen to hash to the same bucket as a
@@ -146,18 +149,51 @@ And there will no doubt be ways of abusing the resulting modified SFQ.
 Hey, I never promised you that life would be easy!  ;-)
 <p>@@QQE@@
 
-<h2><a name="FQ-CoDel Overview">FQ-CoDel Overview</a></h2>
+<h2><a name="CoDel Overview">CoDel Overview</a></h2>
 
-<p>The underlying CoDel article is described in
+<p>CoDel is described in
 <a href="http://lwn.net/Articles/496509/">the LWN article</a>,
 <a href="http://queue.acm.org/detail.cfm?id=2209336">the ACM Queue paper</a>,
 <a href="http://cacm.acm.org/magazines/2012/7/151223-controlling-queue-delay/abstract">the CACM article</a>, and
 <a href="http://recordings.conf.meetecho.com/Recordings/watch.jsp?recording=IETF84_TSVAREA&amp;chapter=part_3">Van Jacobson's IETF presentation</a>.
 The basic idea is to control queue length, maintaining sufficient queueing
-to keep the outgoing link busy, but to avoid building up the queue beyond
+to keep the outgoing link busy, but avoiding building up the queue beyond
 that point.
-Roughly speaking, this is done by preferentially dropping
-packets that sit in the queue for longer time periods.
+This is done by preferentially dropping
+packets that remain in the queue for &ldquo;too long&rdquo;
+
+<p>When each new packet arrives, it is marked with its arrival time.
+Later, when it is that packet's turn to be dequeued, if its
+<i>sojourn time</i> (the current time minus the arrival time)
+exceeds the target time, the packet is dropped.
+
+<p>@@QQ@@
+But just how long is &ldquo;too long&rdquo;?
+<p>@@QQA@@
+The target time, also called the <i>quantum</i>, is normally set
+to about five milliseconds.
+The goal is for the quantum to be roughly 5% of the round-trip time,
+which, given a typical 100-millisecond round-trip time, comes to
+five milliseconds.
+This approach has proven to be quite effective in a wide variety
+of situations.
+<p>@@QQE@@
+
+<p>However, one drawback of CoDel is that it controls only a single
+queue.
+As a result, packets from low-bandwidth sessions (such as VOIP sessions)
+can be delayed by packets from high-bandwidth sessions such as video
+downloads.
+
+<h2><a name="FQ-CoDel Overview">FQ-CoDel Overview</a></h2>
+
+<p>It would be better to allow the low-bandwidth time-sensitive
+VOIP packets to jump ahead of the video download, but not to the extent
+that the video download is in any danger of starvation&mdash;or even in
+danger of significant throughput degradation.
+One way to do this is to combine CoDel with SFQ, resulting in FQ-CoDel.
+This combining requires significant rework of SFQ, but
+of course Eric Dumazet was up to the job.
 
 <p>@@QQ@@
 What does the FQ-CoDel acronym expand to?
@@ -178,27 +214,17 @@ No doubt additional expansions will appear in the fullness of time.
 and performance, leaving naming debates to others.
 <p>@@QQE@@
 
-<p>Nevertheless, CoDel still maintains a single queue, so that low-bandwidth
-packets (such as those from VOIP sessions)
-could easily get stuck behind higher-bandwidth
-flows such as video downloads.
-It would be better to allow the low-bandwidth time-sensitive
-VOIP packets to jump ahead of the video download, but not to the extent
-that the video download is in any danger of starvation&mdash;or even in
-danger of significant throughput degradation.
-One way to do this is to combine CoDel with SFQ.
-This combining requires significant rework of SFQ, but
-of course Eric Dumazet was up to the job.
-A rough schematic of the result is shown below:
+<p>A rough schematic of FQ-CoDel is shown below:
 
 <p><img src="FQ-CoDel.png" width="30%" alt="FQ-CoDel.png">
 
 <p>The most significant attribute of SFQ remains, namely that packets
 are hashed into multiple buckets.
-However, each bucket contains not a first-come-first-served queue as
-is the case with SFQ, but rather a CoDel-managed queue, which is called
-a &ldquo;flow&rdquo; to distinguish it from the straightforward
-first-come-first-serve queue used by SFQ.
+However, each FQ-CoDel bucket contains a CoDel-managed queue.
+The group of sessions that hash to a given FQ-CoDel bucket is called
+a <i>flow</i>.
+In addition, the FQ-CoDel source code uses &ldquo;flow&rdquo; to
+denote the per-bucket data structure, including the queue.
 
 <p>Perhaps the next most significant change in that there are now two lists
 linking the flows together instead of just one.
@@ -209,7 +235,7 @@ The next flow to be dequeued from is indicated by the dash-dotted
 green arrow referencing bucket&nbsp;D.
 The second list contains all other non-empty flows, in this case
 only flow&nbsp;C, which with high probability contains &ldquo;hog&rdquo;
-session.
+sessions.
 
 <p>@@QQ@@
 But mightn't flow&nbsp;C instead just contain a bunch of packets from
@@ -217,11 +243,9 @@ a number of unlucky VOIP sessions?
 Wouldn't that be needlessly inflicting dropouts on the hapless VOIP users?
 <p>@@QQA@@
 Indeed it might.
-Which is why there are all those &ldquo;with high probability&rdquo; qualifiers
-in the description.
-However, given that FQ-CoDel provides no fewer than 1024 hashed flows,
+However, given that FQ-CoDel uses no fewer than 1024 hash buckets,
 the probabilty that (say) 100 VOIP sessions will all hash to the
-same flow is something like ten to the power of minus 300.
+same bucket is something like ten to the power of minus 300.
 Thus, the probability that at least one of the VOIP sessions will hash
 to some other flow is very high indeed.
 
@@ -284,8 +308,8 @@ and precisely in the following state diagram:
 <p><img src="flowstate.png" width="35%" alt="flowstate.png">
 
 <p>All flows are initially empty.
-When the first packet arrives at an empty flow, that
-flow to be classified as low bandwidth, and thus added to the
+When a packet arrives at an empty flow, that
+flow is classified as low bandwidth, and is thus added to the
 <code>new_flows</code> list in the implementation.
 
 <p>@@QQ@@
@@ -328,13 +352,14 @@ list to be serviced.
 
 <p>Once the <code>new_flows</code> list empties, the flow at the head
 of the <code>old_flows</code> list will be dequeued from until it either
+one of its packets
 exceeds its quantum (in which case it is moved to the end of the
 <code>old_flows</code> list), or until it empties, in which case it
 is removed from the <code>old_flows</code> list, returning it to its
 initial state, namely the box labeled &ldquo;Empty&rdquo in the
 above diagram.
 
-<p>Another key aspect in which FQ-CoDel differs
+<p>Another important FQ-CoDel change
 is that it drops packets from the head of
 the queue, rather than the traditional drop from the tail,
 a tradition that SFQ adhered to.
@@ -358,13 +383,14 @@ as illustrated in the following diagram.
 
 <p><img src="headtaildrop.png" width="35%" alt="headtaildrop.png">
 
-<p>In addition, use of head drop instead of tail drop results in
-dropping of older packets, which is helpful in cases where faster
+<p>In addition, dropping from the head instead of the tail means that
+older packets are preferentially dropped,
+which is helpful in cases where faster
 propagation of newer information is more important than slower
 propagation of older information.
 
 <p>Another difference between SFQ and FQ-CoDel is that the array on
-the left-hand side of the diagram is just an
+the left-hand side of the diagram is simply an
 array of <code>int</code>s in FQ-CoDel, as opposed to SFQ's array of
 list headers.
 This change was necessary because FQ-CoDel does its accounting in
@@ -384,8 +410,8 @@ guarantee that all operations be O(1).
 <p>Instead, for FQ-CoDel, the left-hand array has one entry per bucket,
 where each entry contains the current count of bytes for the corresponding
 bucket.
-When it is necessary to drop a packet, FQ-CoDel scans this array looking
-for the largest entry.
+When it is necessary to drop a packet due to packet overlimit conditions,
+FQ-CoDel scans this array looking for the largest entry.
 Because the array has only 1024 entries comprising 4096 contiguous bytes,
 the caches of modern microprocessors make short work of scanning this
 array.
@@ -420,7 +446,7 @@ principles of its operation.
 
 <h2><a name="Configuring FQ-CoDel">Configuring FQ-CoDel</a></h2>
 
-<p>Because FQ-CoDel make use of a number of Linux-kernel networking
+<p>Because FQ-CoDel makes use of a number of Linux-kernel networking
 features, it is usually not sufficient to simply enable it via
 the <code>CONFIG_NET_SCH_FQ_CODEL</code> kernel parameter.
 In addition, your Ethernet network driver must be instrumented to support
@@ -484,7 +510,7 @@ An example setup may be found
 <p>To demonstrate the effectiveness of FQ-CoDel, Dave T&auml;ht and David
 Woodhouse ran a test concurrently running four TCP uploads, four additional
 TCP downloads, along with four low-bandwidth workloads, three of which
-used UDP and the fourth being ICMP ping packets.
+used UDP while the fourth used ICMP ping packets.
 The graphs below show the throughputs of the TCP streams and the latencies
 of the low-bandwidth workloads.
 The graph to the right uses FQ-CoDel, while that to the left does not.
@@ -507,13 +533,13 @@ In contrast, the FQ-CoDel latency is not affected much by the throughput,
 as is desired.
 
 <p>@@QQ@@
-Why the jumps in throughput near the beginnings and ends of the tests?
+Why are there jumps in throughput near the beginnings and ends of the tests?
 <p>@@QQA@@
 This is likely due to streams starting and finishing early.
 <p>@@QQE@@
 
 <p>@@QQ@@
-Why the smaller per-session spikes in throughput during the tests?
+Why are there smaller per-session spikes in throughput during the tests?
 <p>@@QQA@@
 Packet drops can force individual sessions to sharply reduce their offered
 load momentarily.  
@@ -531,7 +557,7 @@ improvement.
 <p>One pressing problem is that of low-bandwidth links.
 To see this, consider a 1&nbsp;Mbit/s link, which requires more than
 12&nbsp;milliseconds to transmit a 1536-byte packet.
-Unfortunately, this time is more than double FQ-CoDel's quantum
+Unfortunately, this time is more than double FQ-CoDel's typical quantum
 of 5&nbsp;milliseconds, which in turn prevents FQ-CoDel from
 distinguishing between low-bandwidth and &ldquo;hog&rdquo; sessions.
 This problem might be addressed by reducing the
@@ -562,7 +588,7 @@ to the Ethernet.
 hubs/switches and on the ADSL modem.
 This would allow systems connected to Ethernet to use FQ-CoDel with
 the standard 5-millisecond quantum, while the ADSL modem could use
-a larger quantum matched to the ADSL bandwidth available at that point
+a larger quantum matched to the available ADSL bandwidth.
 in time.
 
 <p>Of course, getting FQ-CoDel installed on all hubs, switches, and
@@ -610,9 +636,9 @@ Trust me, this will happen sooner or later.
 When it happens, it will be dealt with&mdash;and even now, FQ-CoDel
 workers are looking at other
 <a href="http://en.wikipedia.org/wiki/Active_queue_management">active queue management (AQM)</a>
-(for example,
+schemes (for example,
 <a href="http://www.bufferbloat.net/projects/cerowrt">CeroWrt</a>)
-schemes to see if FQ-CoDel can be further improved.
+to see if FQ-CoDel can be further improved.
 However, FQ-CoDel works well as is, so we can expect to see it
 deployed widely, which means that we should soon reap the benefits
 of improved VOIP sessions with minimal impact on bulk-data downloads.
@@ -655,8 +681,7 @@ bufferbloat, and I very much look forward to its rapid deployment!
 
 <h1><a name="Acknowledgments">Acknowledgments</a></h1>
 
-<p>TBD.  <!-- Including all potential authors, trim when author list done.
-We all owe thanks to Kathleen Nichols and Van Jacobson for CoDel,
+<p>We all owe thanks to Kathleen Nichols and Van Jacobson for CoDel,
 and to Eric Dumazet and Dave T&auml;ht for FQ-CoDel and for the Linux-kernel
 implementation of both CoDel and FQ-CoDel.
 I am grateful to Dave Siemon for his
@@ -668,8 +693,9 @@ Rick Jones, David Lang, Michael Richardson, Greg White, Jonathan Morten,
 Eric Dumazet, and Richard Brown for many insightful discussions.
 Dave T&auml;ht in particular encouraged me to start this article in the first
 place, and provided much-needed encouragement along the way.
+We all are indebted to Richard Brown for helping to make this
+article human-readable.
 Finally, I thank Jim Wasko for his support of this effort.
--->
 
 <h1><a name="Legal Statement">Legal Statement</a></h1>
 
