@@ -4,7 +4,7 @@
         <head><title>FQ-CoDel &mdash; SFQ on Steroids [LWN.net]</title>
         <meta HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
 
-           <p>December 13, 2012</p>
+           <p>December 14, 2012</p>
            <p>As told to Paul E.&nbsp;McKenney by the bufferbloat list</p>
 
 <h2>Introduction</h2>
@@ -12,10 +12,12 @@
 <p><a href="http://lwn.net/Articles/419714/">Bufferbloat</a>
 severely degrades Internet response times, particularly for low-bandwidth
 traffic such as
-<a href="http://en.wikipedia.org/wiki/Voice_over_IP">voice-over-IP (VOIP)</a>.
-Although unintelligible VOIP connections are perhaps the most familiar
-symptom of bufferbloat,
+<a href="http://en.wikipedia.org/wiki/Voice_over_IP">voice-over-IP (VOIP)</a>
+or web browsing.
+Although unintelligible VOIP connections and sluggish web-page loads
+are perhaps the most familiar symptom of bufferbloat,
 it also impedes other important types of traffic, including
+<a href="http://en.wikipedia.org/wiki/Transmission_Control_Protocol#Connection_establishment">TCP connection establishment</a>,
 <a href="http://en.wikipedia.org/wiki/Domain_Name_System">DNS</a> lookups,
 <a href="http://en.wikipedia.org/wiki/Dhcp">DHCP</a> packets,
 <a href="http://en.wikipedia.org/wiki/Address_Resolution_Protocol">ARP</a>
@@ -38,8 +40,21 @@ However, in his
 <a href="http://recordings.conf.meetecho.com/Recordings/watch.jsp?recording=IETF84_TSVAREA&amp;chapter=part_3">IETF presentation</a>,
 Van Jacobson recommends the use of FQ-CoDel, which combines
 <a href="http://www.rdrop.com/users/paulmck/scalability/paper/sfq.2002.06.04.pdf">stochastic fairness queueing (SFQ)</a>
-with CoDel.
-Eric and Dave were ahead of this game as well, and their FQ-CoDel
+with CoDel:
+
+<blockquote>
+	&ldquo;FQ-CoDel provides great isolation... If you've got low-rate
+	videoconferencing and low rate web traffic they never get dropped. A
+	lot of the issues with iw10 go away, because all that other traffic
+	sees is the front of the queue and you don't know how big its window
+	is and you don't care because you are not affected by it. And:
+	FQ-CoDel increases utilization across your entire networking fabric
+	especially for bidirectional traffic... If we're sticking code into
+	boxes to deploy CoDel, don't do that. Deploy FQ-CoDel. It's just an
+	across the board win.&rdquo; &ndash; <i>Van Jacobson</i>
+</blockquote>
+
+<p>Eric and Dave were ahead of this game as well, and their FQ-CoDel
 implementation also appeared in v3.5 as
 <code>net/sched/sch_fq_codel.c</code>.
 Of course, Alexey Kuznetsov implemented SFQ itself as
@@ -64,7 +79,8 @@ The remainder of this article addresses this question as follows:
 
 <h2><a name="SFQ Overview">SFQ Overview</a></h2>
 
-<p>The purpose of SFQ is straightforward: With high probability, isolate
+<p>My purpose in inventing SFQ back in the late 80s was straightforward:
+With high probability, isolate
 &ldquo;hog&rdquo; sessions from other sessions so that the
 &ldquo;hog&rdquo; sessions bear the brunt of any packet
 dropping that might be required.
@@ -144,7 +160,10 @@ packet transmissions?
 <p>@@QQA@@
 Indeed it might, because the separate TCP sessions would probably occupy
 different buckets, each getting a separate share of the bandwidth.
-If this sort of thing becomes too common, there are ways to deal with it.
+However, web browsers already use multiple TCP sessions to attain
+better performance, and SFQ nevertheless seems to work reasonably well.
+If this sort of thing becomes pathological, which it might, given that
+multiple TCP sessions defeats slow-start, there are ways to deal with it.
 And there will no doubt be ways of abusing the resulting modified SFQ.
 Hey, I never promised you that life would be easy!  ;-)
 <p>@@QQE@@
@@ -161,23 +180,27 @@ to keep the outgoing link busy, but avoiding building up the queue beyond
 that point.
 This is done by preferentially dropping
 packets that remain in the queue for &ldquo;too long&rdquo;
+As such, FQ-CoDel is the first of a new class of
+<a href="http://en.wikipedia.org/wiki/Active_queue_management">active queue management (AQM)</a>
+algorithms based on delay rather than on queue length.
+A key advantage of delay-based AQM algorithms over their queue-length
+predecessors such as
+<a href="http://en.wikipedia.org/wiki/Random_early_drop">random early detection (RED)</a>
+is that the former require much less configuration and can be used with
+multiple queues, as will be seen in the
+<a href="#FQ-CoDel Overview">next section</a>.
 
 <p>When each new packet arrives, it is marked with its arrival time.
 Later, when it is that packet's turn to be dequeued, if its
 <i>sojourn time</i> (the current time minus the arrival time)
 exceeds the target time, the packet is dropped.
-
-<p>@@QQ@@
-But just how long is &ldquo;too long&rdquo;?
-<p>@@QQA@@
-The target time, also called the <i>quantum</i>, is normally set
+This target time, also called the <i>quantum</i>, is normally set
 to about five milliseconds.
 The goal is for the quantum to be roughly 5% of the round-trip time,
 which, given a typical 100-millisecond round-trip time, comes to
 five milliseconds.
 This approach has proven to be quite effective in a wide variety
 of situations.
-<p>@@QQE@@
 
 <p>However, one drawback of CoDel is that it controls only a single
 queue.
@@ -219,8 +242,9 @@ and performance, leaving naming debates to others.
 <p><img src="FQ-CoDel.png" width="30%" alt="FQ-CoDel.png">
 
 <p>The most significant attribute of SFQ remains, namely that packets
-are hashed into multiple buckets.
-However, each FQ-CoDel bucket contains a CoDel-managed queue.
+are hashed into multiple buckets based on their quintuple.
+However, each FQ-CoDel bucket contains a CoDel-managed queue instead
+of SFQ's FIFO queue.
 The group of sessions that hash to a given FQ-CoDel bucket is called
 a <i>flow</i>.
 In addition, the FQ-CoDel source code uses &ldquo;flow&rdquo; to
@@ -615,7 +639,10 @@ still largely an unsolved problem.
 and core routers may need to use other approaches, especially if they
 are using shared hardware to handle both leased-line and Internet traffic.
 <a href="http://www.bobbriscoe.net/presents/1210isoc/1210isoc-briscoe.pdf">Other proposals</a>
-have been put forward to handle these sorts of situations.
+have been put forward to handle these sorts of situations,
+however, it is quite possible that FQ-CoDel can work well in non-endpoint
+network locations, for example, by modifying FQ-CoDel's hashing to
+use something other than the quintuple.
 
 <p>Finally, high-speed network devices, for example, 40&nbsp;Gbit/s Ethernet,
 often use multiple transmit queues to reduce contention
@@ -634,9 +661,7 @@ it does not handle very well?
 Trust me, this will happen sooner or later.
 <p>@@QQA@@
 When it happens, it will be dealt with&mdash;and even now, FQ-CoDel
-workers are looking at other
-<a href="http://en.wikipedia.org/wiki/Active_queue_management">active queue management (AQM)</a>
-schemes (for example,
+workers are looking at other AQM schemes (for example,
 <a href="http://www.bufferbloat.net/projects/cerowrt">CeroWrt</a>)
 to see if FQ-CoDel can be further improved.
 However, FQ-CoDel works well as is, so we can expect to see it
@@ -656,7 +681,8 @@ bufferbloat in today's Internet.
 <p>So, when should you use FQ-CoDel?
 As we have seen, it is most effective when you have time-sensitive
 low-bandwidth traffic competing with high-bandwidth sessions.
-Of course, given DNS, DHCP, ARP, and routing packets, everyone has
+Of course, given TCP connection establishment, DNS, DHCP, ARP,
+and routing packets, everyone has
 some low-bandwidth traffic.
 FQ CoDel can be very effective at preventing the high-bandwidth
 traffic from degrading the response time of the low-bandwidth

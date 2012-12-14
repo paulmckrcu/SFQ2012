@@ -4,7 +4,7 @@
         <head><title>FQ-CoDel &mdash; SFQ on Steroids [LWN.net]</title>
         <meta HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
 
-           <p>December 13, 2012</p>
+           <p>December 14, 2012</p>
            <p>As told to Paul E.&nbsp;McKenney by the bufferbloat list</p>
 
 <h2>Introduction</h2>
@@ -12,10 +12,12 @@
 <p><a href="http://lwn.net/Articles/419714/">Bufferbloat</a>
 severely degrades Internet response times, particularly for low-bandwidth
 traffic such as
-<a href="http://en.wikipedia.org/wiki/Voice_over_IP">voice-over-IP (VOIP)</a>.
-Although unintelligible VOIP connections are perhaps the most familiar
-symptom of bufferbloat,
+<a href="http://en.wikipedia.org/wiki/Voice_over_IP">voice-over-IP (VOIP)</a>
+or web browsing.
+Although unintelligible VOIP connections and sluggish web-page loads
+are perhaps the most familiar symptom of bufferbloat,
 it also impedes other important types of traffic, including
+<a href="http://en.wikipedia.org/wiki/Transmission_Control_Protocol#Connection_establishment">TCP connection establishment</a>,
 <a href="http://en.wikipedia.org/wiki/Domain_Name_System">DNS</a> lookups,
 <a href="http://en.wikipedia.org/wiki/Dhcp">DHCP</a> packets,
 <a href="http://en.wikipedia.org/wiki/Address_Resolution_Protocol">ARP</a>
@@ -38,8 +40,21 @@ However, in his
 <a href="http://recordings.conf.meetecho.com/Recordings/watch.jsp?recording=IETF84_TSVAREA&amp;chapter=part_3">IETF presentation</a>,
 Van Jacobson recommends the use of FQ-CoDel, which combines
 <a href="http://www.rdrop.com/users/paulmck/scalability/paper/sfq.2002.06.04.pdf">stochastic fairness queueing (SFQ)</a>
-with CoDel.
-Eric and Dave were ahead of this game as well, and their FQ-CoDel
+with CoDel:
+
+<blockquote>
+	&ldquo;FQ-CoDel provides great isolation... If you've got low-rate
+	videoconferencing and low rate web traffic they never get dropped. A
+	lot of the issues with iw10 go away, because all that other traffic
+	sees is the front of the queue and you don't know how big its window
+	is and you don't care because you are not affected by it. And:
+	FQ-CoDel increases utilization across your entire networking fabric
+	especially for bidirectional traffic... If we're sticking code into
+	boxes to deploy CoDel, don't do that. Deploy FQ-CoDel. It's just an
+	across the board win.&rdquo; &ndash; <i>Van Jacobson</i>
+</blockquote>
+
+<p>Eric and Dave were ahead of this game as well, and their FQ-CoDel
 implementation also appeared in v3.5 as
 <code>net/sched/sch_fq_codel.c</code>.
 Of course, Alexey Kuznetsov implemented SFQ itself as
@@ -64,7 +79,8 @@ The remainder of this article addresses this question as follows:
 
 <h2><a name="SFQ Overview">SFQ Overview</a></h2>
 
-<p>The purpose of SFQ is straightforward: With high probability, isolate
+<p>My purpose in inventing SFQ back in the late 80s was straightforward:
+With high probability, isolate
 &ldquo;hog&rdquo; sessions from other sessions so that the
 &ldquo;hog&rdquo; sessions bear the brunt of any packet
 dropping that might be required.
@@ -155,15 +171,27 @@ to keep the outgoing link busy, but avoiding building up the queue beyond
 that point.
 This is done by preferentially dropping
 packets that remain in the queue for &ldquo;too long&rdquo;
+As such, FQ-CoDel is the first of a new class of
+<a href="http://en.wikipedia.org/wiki/Active_queue_management">active queue management (AQM)</a>
+algorithms based on delay rather than on queue length.
+A key advantage of delay-based AQM algorithms over their queue-length
+predecessors such as
+<a href="http://en.wikipedia.org/wiki/Random_early_drop">random early detection (RED)</a>
+is that the former require much less configuration and can be used with
+multiple queues, as will be seen in the
+<a href="#FQ-CoDel Overview">next section</a>.
 
 <p>When each new packet arrives, it is marked with its arrival time.
 Later, when it is that packet's turn to be dequeued, if its
 <i>sojourn time</i> (the current time minus the arrival time)
 exceeds the target time, the packet is dropped.
-
-<p><a name="Quick Quiz 2"><b>Quick Quiz 2</b>:</a>
-But just how long is &ldquo;too long&rdquo;?
-<br><a href="#qq2answer">Answer</a>
+This target time, also called the <i>quantum</i>, is normally set
+to about five milliseconds.
+The goal is for the quantum to be roughly 5% of the round-trip time,
+which, given a typical 100-millisecond round-trip time, comes to
+five milliseconds.
+This approach has proven to be quite effective in a wide variety
+of situations.
 
 <p>However, one drawback of CoDel is that it controls only a single
 queue.
@@ -181,17 +209,18 @@ One way to do this is to combine CoDel with SFQ, resulting in FQ-CoDel.
 This combining requires significant rework of SFQ, but
 of course Eric Dumazet was up to the job.
 
-<p><a name="Quick Quiz 3"><b>Quick Quiz 3</b>:</a>
+<p><a name="Quick Quiz 2"><b>Quick Quiz 2</b>:</a>
 What does the FQ-CoDel acronym expand to?
-<br><a href="#qq3answer">Answer</a>
+<br><a href="#qq2answer">Answer</a>
 
 <p>A rough schematic of FQ-CoDel is shown below:
 
 <p><img src="FQ-CoDel.png" width="30%" alt="FQ-CoDel.png">
 
 <p>The most significant attribute of SFQ remains, namely that packets
-are hashed into multiple buckets.
-However, each FQ-CoDel bucket contains a CoDel-managed queue.
+are hashed into multiple buckets based on their quintuple.
+However, each FQ-CoDel bucket contains a CoDel-managed queue instead
+of SFQ's FIFO queue.
 The group of sessions that hash to a given FQ-CoDel bucket is called
 a <i>flow</i>.
 In addition, the FQ-CoDel source code uses &ldquo;flow&rdquo; to
@@ -208,23 +237,23 @@ The second list contains all other non-empty flows, in this case
 only flow&nbsp;C, which with high probability contains &ldquo;hog&rdquo;
 sessions.
 
-<p><a name="Quick Quiz 4"><b>Quick Quiz 4</b>:</a>
+<p><a name="Quick Quiz 3"><b>Quick Quiz 3</b>:</a>
 But mightn't flow&nbsp;C instead just contain a bunch of packets from
 a number of unlucky VOIP sessions?
 Wouldn't that be needlessly inflicting dropouts on the hapless VOIP users?
+<br><a href="#qq3answer">Answer</a>
+
+<p><a name="Quick Quiz 4"><b>Quick Quiz 4</b>:</a>
+OK, but if this session segregation is so valuable, why didn't the original
+SFQ implement it?
 <br><a href="#qq4answer">Answer</a>
 
 <p><a name="Quick Quiz 5"><b>Quick Quiz 5</b>:</a>
-OK, but if this session segregation is so valuable, why didn't the original
-SFQ implement it?
-<br><a href="#qq5answer">Answer</a>
-
-<p><a name="Quick Quiz 6"><b>Quick Quiz 6</b>:</a>
 Suppose that a number of &ldquo;hog&rdquo; sessions are passing through
 a given instance of FQ-CoDel.
 Given the stochastic nature of FQ-CoDel, what guarantees fair treatment
 of the &ldquo;hogs&rdquo; with respect to each other?
-<br><a href="#qq6answer">Answer</a>
+<br><a href="#qq5answer">Answer</a>
 
 <p>FQ-CoDel operates by preferentially dequeueing from the low-bandwidth
 flows on the <code>new_flows</code> list.
@@ -244,24 +273,24 @@ When a packet arrives at an empty flow, that
 flow is classified as low bandwidth, and is thus added to the
 <code>new_flows</code> list in the implementation.
 
-<p><a name="Quick Quiz 7"><b>Quick Quiz 7</b>:</a>
+<p><a name="Quick Quiz 6"><b>Quick Quiz 6</b>:</a>
 But this means that the first packet from a &ldquo;hog&rdquo; session
 will cause that session to be placed onto <code>new_flows</code>.
 Doesn't this initial misclassification unfairly penalize competing
 low-bandwidth time-sensitive sessions?
-<br><a href="#qq7answer">Answer</a>
+<br><a href="#qq6answer">Answer</a>
 
 <p>A flow on the <code>new_flows</code> list is guaranteed to
 eventually either become empty or exceed the quantum.
 If it exceeds its quantum, it will of course be moved to the
 end of the <code>old_flows</code> list.
 
-<p><a name="Quick Quiz 8"><b>Quick Quiz 8</b>:</a>
+<p><a name="Quick Quiz 7"><b>Quick Quiz 7</b>:</a>
 Why couldn't packets arrive at just the right rate so that the
 flow never emptied, but at the same time, the packets being
 dequeued were always recent arrivals?
 Couldn't that result in starvation of the <code>old_flows</code>?
-<br><a href="#qq8answer">Answer</a>
+<br><a href="#qq7answer">Answer</a>
 
 <p>Interestingly enough, if a <code>new_flows</code> flow becomes
 empty, it is also moved to the end of the <code>old_flows</code> list.
@@ -352,9 +381,9 @@ packet-drop rates (thus high reliabilty), while &ldquo;hog&rdquo;
 sessions incur increased latency and higher packet-drop rates in exchange
 for greater bandwidth.
 
-<p><a name="Quick Quiz 9"><b>Quick Quiz 9</b>:</a>
+<p><a name="Quick Quiz 8"><b>Quick Quiz 8</b>:</a>
 But is FQ-CoDel fair?
-<br><a href="#qq9answer">Answer</a>
+<br><a href="#qq8answer">Answer</a>
 
 <h2><a name="Configuring FQ-CoDel">Configuring FQ-CoDel</a></h2>
 
@@ -375,11 +404,11 @@ In addition, some
 also require that the
 <code>CONFIG_NET_SCH_HTB</code> kernel parameter be enabled.
 
-<p><a name="Quick Quiz 10"><b>Quick Quiz 10</b>:</a>
+<p><a name="Quick Quiz 9"><b>Quick Quiz 9</b>:</a>
 What if my network driver does not yet have the needed calls to
 <code>netdev_completed_queue()</code>,
 <code>netdev_sent_queue</code>, and <code>netdev_reset_queue</code>?
-<br><a href="#qq10answer">Answer</a>
+<br><a href="#qq9answer">Answer</a>
 
 <p>In addition, it is necessary to configure FQ-CoDel using the
 <code>tc</code> command.
@@ -437,13 +466,13 @@ and then the uploads start.
 In contrast, the FQ-CoDel latency is not affected much by the throughput,
 as is desired.
 
-<p><a name="Quick Quiz 11"><b>Quick Quiz 11</b>:</a>
+<p><a name="Quick Quiz 10"><b>Quick Quiz 10</b>:</a>
 Why are there jumps in throughput near the beginnings and ends of the tests?
-<br><a href="#qq11answer">Answer</a>
+<br><a href="#qq10answer">Answer</a>
 
-<p><a name="Quick Quiz 12"><b>Quick Quiz 12</b>:</a>
+<p><a name="Quick Quiz 11"><b>Quick Quiz 11</b>:</a>
 Why are there smaller per-session spikes in throughput during the tests?
-<br><a href="#qq12answer">Answer</a>
+<br><a href="#qq11answer">Answer</a>
 
 <h2><a name="Remaining Challenges">Remaining Challenges</a></h2>
 
@@ -468,13 +497,13 @@ FQ-CoDel remain parameterless, requiring no configuration.
 But perhaps a compromise can be reached where FQ-CoDel automatically
 configures itself based on the expected bandwidth of the network device.
 
-<p><a name="Quick Quiz 13"><b>Quick Quiz 13</b>:</a>
+<p><a name="Quick Quiz 12"><b>Quick Quiz 12</b>:</a>
 But what if FQ-CoDel is configured on a high-bandwidth device such
 as 100&nbsp;Mbit/s Ethernet, which then feeds into a low-bandwidth
 <a href="http://en.wikipedia.org/wiki/Adsl">ADSL</a> line?
 In that case, shouldn't FQ-CoDel configure itself to the
 ADSL line's bandwidth instead of that of Ethernet?
-<br><a href="#qq13answer">Answer</a>
+<br><a href="#qq12answer">Answer</a>
 
 <p>An even sterner challenge is posed by
 <a href="http://en.wikipedia.org/wiki/Wi-Fi">WiFi</a>,
@@ -493,7 +522,10 @@ still largely an unsolved problem.
 and core routers may need to use other approaches, especially if they
 are using shared hardware to handle both leased-line and Internet traffic.
 <a href="http://www.bobbriscoe.net/presents/1210isoc/1210isoc-briscoe.pdf">Other proposals</a>
-have been put forward to handle these sorts of situations.
+have been put forward to handle these sorts of situations,
+however, it is quite possible that FQ-CoDel can work well in non-endpoint
+network locations, for example, by modifying FQ-CoDel's hashing to
+use something other than the quintuple.
 
 <p>Finally, high-speed network devices, for example, 40&nbsp;Gbit/s Ethernet,
 often use multiple transmit queues to reduce contention
@@ -506,11 +538,11 @@ is extremely useful in the fight against bufferbloat, and needs to
 be deployed rapidly and widely.
 
 
-<p><a name="Quick Quiz 14"><b>Quick Quiz 14</b>:</a>
+<p><a name="Quick Quiz 13"><b>Quick Quiz 13</b>:</a>
 So, what happens if someone comes up with a type of traffic that
 it does not handle very well?
 Trust me, this will happen sooner or later.
-<br><a href="#qq14answer">Answer</a>
+<br><a href="#qq13answer">Answer</a>
 
 <h2><a name="Summary and Advice">Summary and Advice</a></h2>
 
@@ -524,7 +556,8 @@ bufferbloat in today's Internet.
 <p>So, when should you use FQ-CoDel?
 As we have seen, it is most effective when you have time-sensitive
 low-bandwidth traffic competing with high-bandwidth sessions.
-Of course, given DNS, DHCP, ARP, and routing packets, everyone has
+Of course, given TCP connection establishment, DNS, DHCP, ARP,
+and routing packets, everyone has
 some low-bandwidth traffic.
 FQ CoDel can be very effective at preventing the high-bandwidth
 traffic from degrading the response time of the low-bandwidth
@@ -590,7 +623,10 @@ packet transmissions?
 </p><p><b>Answer</b>:
 Indeed it might, because the separate TCP sessions would probably occupy
 different buckets, each getting a separate share of the bandwidth.
-If this sort of thing becomes too common, there are ways to deal with it.
+However, web browsers already use multiple TCP sessions to attain
+better performance, and SFQ nevertheless seems to work reasonably well.
+If this sort of thing becomes pathological, which it might, given that
+multiple TCP sessions defeats slow-start, there are ways to deal with it.
 And there will no doubt be ways of abusing the resulting modified SFQ.
 Hey, I never promised you that life would be easy!  ;-)
 
@@ -599,23 +635,6 @@ Hey, I never promised you that life would be easy!  ;-)
 
 <a name="qq2answer"></a>
 <p><b>Quick Quiz 2</b>:
-But just how long is &ldquo;too long&rdquo;?
-
-
-</p><p><b>Answer</b>:
-The target time, also called the <i>quantum</i>, is normally set
-to about five milliseconds.
-The goal is for the quantum to be roughly 5% of the round-trip time,
-which, given a typical 100-millisecond round-trip time, comes to
-five milliseconds.
-This approach has proven to be quite effective in a wide variety
-of situations.
-
-
-</p><p><a href="#Quick%20Quiz%202"><b>Back to Quick Quiz 2</b>.</a>
-
-<a name="qq3answer"></a>
-<p><b>Quick Quiz 3</b>:
 What does the FQ-CoDel acronym expand to?
 
 
@@ -636,10 +655,10 @@ No doubt additional expansions will appear in the fullness of time.
 and performance, leaving naming debates to others.
 
 
-</p><p><a href="#Quick%20Quiz%203"><b>Back to Quick Quiz 3</b>.</a>
+</p><p><a href="#Quick%20Quiz%202"><b>Back to Quick Quiz 2</b>.</a>
 
-<a name="qq4answer"></a>
-<p><b>Quick Quiz 4</b>:
+<a name="qq3answer"></a>
+<p><b>Quick Quiz 3</b>:
 But mightn't flow&nbsp;C instead just contain a bunch of packets from
 a number of unlucky VOIP sessions?
 Wouldn't that be needlessly inflicting dropouts on the hapless VOIP users?
@@ -672,10 +691,10 @@ matches that of
 <a href="http://paulmck.livejournal.com/32643.html">hardware cache overflow</a>.
 
 
-</p><p><a href="#Quick%20Quiz%204"><b>Back to Quick Quiz 4</b>.</a>
+</p><p><a href="#Quick%20Quiz%203"><b>Back to Quick Quiz 3</b>.</a>
 
-<a name="qq5answer"></a>
-<p><b>Quick Quiz 5</b>:
+<a name="qq4answer"></a>
+<p><b>Quick Quiz 4</b>:
 OK, but if this session segregation is so valuable, why didn't the original
 SFQ implement it?
 
@@ -686,10 +705,10 @@ Two reasons: (1)&nbsp;I didn't think of it back then, and
 68000 CPUs that I was using at the time.
 
 
-</p><p><a href="#Quick%20Quiz%205"><b>Back to Quick Quiz 5</b>.</a>
+</p><p><a href="#Quick%20Quiz%204"><b>Back to Quick Quiz 4</b>.</a>
 
-<a name="qq6answer"></a>
-<p><b>Quick Quiz 6</b>:
+<a name="qq5answer"></a>
+<p><b>Quick Quiz 5</b>:
 Suppose that a number of &ldquo;hog&rdquo; sessions are passing through
 a given instance of FQ-CoDel.
 Given the stochastic nature of FQ-CoDel, what guarantees fair treatment
@@ -708,10 +727,10 @@ periodically perturbed, and providing a similar perturbation capability
 for FQ-CoDel is ongoing work.
 
 
-</p><p><a href="#Quick%20Quiz%206"><b>Back to Quick Quiz 6</b>.</a>
+</p><p><a href="#Quick%20Quiz%205"><b>Back to Quick Quiz 5</b>.</a>
 
-<a name="qq7answer"></a>
-<p><b>Quick Quiz 7</b>:
+<a name="qq6answer"></a>
+<p><b>Quick Quiz 6</b>:
 But this means that the first packet from a &ldquo;hog&rdquo; session
 will cause that session to be placed onto <code>new_flows</code>.
 Doesn't this initial misclassification unfairly penalize competing
@@ -726,10 +745,10 @@ Furthermore, TCP-based &ldquo;hog&rdquo; sessions begin in slow-start mode,
 thus acting like a low-bandwidth session initially.
 
 
-</p><p><a href="#Quick%20Quiz%207"><b>Back to Quick Quiz 7</b>.</a>
+</p><p><a href="#Quick%20Quiz%206"><b>Back to Quick Quiz 6</b>.</a>
 
-<a name="qq8answer"></a>
-<p><b>Quick Quiz 8</b>:
+<a name="qq7answer"></a>
+<p><b>Quick Quiz 7</b>:
 Why couldn't packets arrive at just the right rate so that the
 flow never emptied, but at the same time, the packets being
 dequeued were always recent arrivals?
@@ -742,10 +761,10 @@ The reason is that FQ-CoDel keeps dequeueing from the same flow
 until that flow either becomes empty or exceeds the quantum.
 
 
-</p><p><a href="#Quick%20Quiz%208"><b>Back to Quick Quiz 8</b>.</a>
+</p><p><a href="#Quick%20Quiz%207"><b>Back to Quick Quiz 7</b>.</a>
 
-<a name="qq9answer"></a>
-<p><b>Quick Quiz 9</b>:
+<a name="qq8answer"></a>
+<p><b>Quick Quiz 8</b>:
 But is FQ-CoDel fair?
 
 
@@ -761,10 +780,10 @@ I hope that future analysis provides many interesting insights into the
 principles of its operation.
 
 
-</p><p><a href="#Quick%20Quiz%209"><b>Back to Quick Quiz 9</b>.</a>
+</p><p><a href="#Quick%20Quiz%208"><b>Back to Quick Quiz 8</b>.</a>
 
-<a name="qq10answer"></a>
-<p><b>Quick Quiz 10</b>:
+<a name="qq9answer"></a>
+<p><b>Quick Quiz 9</b>:
 What if my network driver does not yet have the needed calls to
 <code>netdev_completed_queue()</code>,
 <code>netdev_sent_queue</code>, and <code>netdev_reset_queue</code>?
@@ -779,10 +798,10 @@ Finally, there is an ongoing effort to add these functions, spearheaded
 by Dave T&auml;ht, but help is always welcome!
 
 
-</p><p><a href="#Quick%20Quiz%2010"><b>Back to Quick Quiz 10</b>.</a>
+</p><p><a href="#Quick%20Quiz%209"><b>Back to Quick Quiz 9</b>.</a>
 
-<a name="qq11answer"></a>
-<p><b>Quick Quiz 11</b>:
+<a name="qq10answer"></a>
+<p><b>Quick Quiz 10</b>:
 Why are there jumps in throughput near the beginnings and ends of the tests?
 
 
@@ -790,10 +809,10 @@ Why are there jumps in throughput near the beginnings and ends of the tests?
 This is likely due to streams starting and finishing early.
 
 
-</p><p><a href="#Quick%20Quiz%2011"><b>Back to Quick Quiz 11</b>.</a>
+</p><p><a href="#Quick%20Quiz%2010"><b>Back to Quick Quiz 10</b>.</a>
 
-<a name="qq12answer"></a>
-<p><b>Quick Quiz 12</b>:
+<a name="qq11answer"></a>
+<p><b>Quick Quiz 11</b>:
 Why are there smaller per-session spikes in throughput during the tests?
 
 
@@ -806,10 +825,10 @@ Note that the overall average throughput, indicated by the black trace,
 does not vary much, so the aggregate bandwidth is quite steady.
 
 
-</p><p><a href="#Quick%20Quiz%2012"><b>Back to Quick Quiz 12</b>.</a>
+</p><p><a href="#Quick%20Quiz%2011"><b>Back to Quick Quiz 11</b>.</a>
 
-<a name="qq13answer"></a>
-<p><b>Quick Quiz 13</b>:
+<a name="qq12answer"></a>
+<p><b>Quick Quiz 12</b>:
 But what if FQ-CoDel is configured on a high-bandwidth device such
 as 100&nbsp;Mbit/s Ethernet, which then feeds into a low-bandwidth
 <a href="http://en.wikipedia.org/wiki/Adsl">ADSL</a> line?
@@ -837,10 +856,10 @@ Then again, nothing is perfect, and we must never allow imagined
 perfection to crowd out real improvement.
 
 
-</p><p><a href="#Quick%20Quiz%2013"><b>Back to Quick Quiz 13</b>.</a>
+</p><p><a href="#Quick%20Quiz%2012"><b>Back to Quick Quiz 12</b>.</a>
 
-<a name="qq14answer"></a>
-<p><b>Quick Quiz 14</b>:
+<a name="qq13answer"></a>
+<p><b>Quick Quiz 13</b>:
 So, what happens if someone comes up with a type of traffic that
 it does not handle very well?
 Trust me, this will happen sooner or later.
@@ -848,9 +867,7 @@ Trust me, this will happen sooner or later.
 
 </p><p><b>Answer</b>:
 When it happens, it will be dealt with&mdash;and even now, FQ-CoDel
-workers are looking at other
-<a href="http://en.wikipedia.org/wiki/Active_queue_management">active queue management (AQM)</a>
-schemes (for example,
+workers are looking at other AQM schemes (for example,
 <a href="http://www.bufferbloat.net/projects/cerowrt">CeroWrt</a>)
 to see if FQ-CoDel can be further improved.
 However, FQ-CoDel works well as is, so we can expect to see it
@@ -858,7 +875,7 @@ deployed widely, which means that we should soon reap the benefits
 of improved VOIP sessions with minimal impact on bulk-data downloads.
 
 
-</p><p><a href="#Quick%20Quiz%2014"><b>Back to Quick Quiz 14</b>.</a>
+</p><p><a href="#Quick%20Quiz%2013"><b>Back to Quick Quiz 13</b>.</a>
 
 
 </body></html>
