@@ -191,14 +191,19 @@ multiple queues, as will be seen in the
 <a href="#FQ-CoDel Overview">next section</a>.
 
 <p>When each new packet arrives, it is marked with its arrival time.
-Later, when it is that packet's turn to be dequeued, if its
-<i>sojourn time</i> (the current time minus the arrival time)
-exceeds the target time, the packet is dropped.
+Later, when it is that packet's turn to be dequeued, CoDel computes its
+<i>sojourn time</i> (the current time minus the arrival time).
+If the sojourn time for packets being dequeued exceeds the
+target time for
+a time period of at least <i>interval</i>, packets will be dropped
+until either (1)&nbsp;the queue becomes empty or (2)&nbsp;a packet is
+encountered with a sojourn time that is less than the target time.
 This target time, also called the <i>quantum</i>, is normally set
-to about five milliseconds.
+to about five milliseconds, and the interval is normally set
+to about 100 milliseconds.
 The goal is for the quantum to be roughly 5% of the round-trip time,
-which, given a typical 100-millisecond round-trip time, comes to
-five milliseconds.
+which, given a typical 100-millisecond round-trip time, affirms the
+choice of five milliseconds.
 This approach has proven to be quite effective in a wide variety
 of situations.
 
