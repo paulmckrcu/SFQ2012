@@ -195,8 +195,12 @@ Later, when it is that packet's turn to be dequeued, CoDel computes its
 <i>sojourn time</i> (the current time minus the arrival time).
 If the sojourn time for packets being dequeued exceeds the
 target time for
-a time period of at least <i>interval</i>, packets will be dropped
-until either (1)&nbsp;the queue becomes empty or (2)&nbsp;a packet is
+a time period of at least <i>interval</i>, a packet will be dropped
+in order to signal the source endpoint to reduce its send rate.
+If the sojourn still remains above the target time, additional packet
+drops will occur on a schedule computed from an inverse-square-root
+control law until either (1)&nbsp;the queue becomes empty or
+(2)&nbsp;a packet is
 encountered with a sojourn time that is less than the target time.
 This target time, also called the <i>quantum</i>, is normally set
 to about five milliseconds, and the interval is normally set
@@ -206,6 +210,29 @@ which, given a typical 100-millisecond round-trip time, affirms the
 choice of five milliseconds.
 This approach has proven to be quite effective in a wide variety
 of situations.
+
+<p>This process is illustrated in the following (not to scale) diagram:
+
+<p><img src="CoDelDrop.png" width="80%" alt="CoDelDrop.png">
+
+<P>Here time increases from left to right, and the curve gives the
+sojourn time of the packet at the head of the CoDel queue as a function
+of time.
+As you can see, the sojourn time rise significantly above the target,
+requiring CoDel to react so as to bring the sojourn back below target
+at the right-hand end of the diagram.
+
+<p>As noted earlier, CoDel reacts by dropping packets, and
+the second and subsequent vertical dot-dashed lines correspond to
+single dropped packets.
+This means that even during the time that the sojourn time is
+greater than the target time, most packets are being transmitted
+rather than being dropped.
+The reason for this is that it takes on the order of 100 milliseconds
+for the fact of the packet drop to reach the traffic source.
+CoDel's design therefore must allow for this delay, which it does by
+scheduling packet-drops at an interval that is sufficiently large to
+allow the traffic source time to react.
 
 <p>However, one drawback of CoDel is that it controls only a single
 queue.
@@ -295,16 +322,15 @@ These last two results were computed using Monte Carlo simulations:
 Oddly enough, the mathematics for VOIP-session collision exactly
 matches that of
 <a href="http://paulmck.livejournal.com/32643.html">hardware cache overflow</a>.
-<p>@@QQE@@
 
-<p>@@QQ@@
-OK, but if this session segregation is so valuable, why didn't the original
-SFQ implement it?
-<p>@@QQA@@
-Two reasons: (1)&nbsp;I didn't think of it back then, and
+<p>The alert and historically savvy reader might note that the original
+SFQ failed to implement session segregation.
+There are two reasons for this:
+(1)&nbsp;I didn't think of it back then, and
 (2)&nbsp;It might not have been a winning strategy for the low-clock-rate
 68000 CPUs that I was using at the time.
 <p>@@QQE@@
+
 
 <p>@@QQ@@
 Suppose that a number of &ldquo;hog&rdquo; sessions are passing through
@@ -340,19 +366,12 @@ and precisely in the following state diagram:
 When a packet arrives at an empty flow, that
 flow is classified as low bandwidth, and is thus added to the
 <code>new_flows</code> list in the implementation.
-
-<p>@@QQ@@
-But this means that the first packet from a &ldquo;hog&rdquo; session
-will cause that session to be placed onto <code>new_flows</code>.
-Doesn't this initial misclassification unfairly penalize competing
-low-bandwidth time-sensitive sessions?
-<p>@@QQA@@
-Again, indeed it might.
+Of course, this means that a new &ldquo;hog&rdquo; session will initially
+be misclassified.
 However, a &ldquo;hog&rdquo; session is likely to persist for some time, so the
 fraction of time that it spends misclassified is usually insignificant.
 Furthermore, TCP-based &ldquo;hog&rdquo; sessions begin in slow-start mode,
 thus acting like a low-bandwidth session initially.
-<p>@@QQE@@
 
 <p>A flow on the <code>new_flows</code> list is guaranteed to
 eventually either become empty or exceed the quantum.
@@ -561,22 +580,19 @@ and then the uploads start.
 In contrast, the FQ-CoDel latency is not affected much by the throughput,
 as is desired.
 
-<p>@@QQ@@
-Why are there jumps in throughput near the beginnings and ends of the tests?
-<p>@@QQA@@
-This is likely due to streams starting and finishing early.
-<p>@@QQE@@
-
-<p>@@QQ@@
-Why are there smaller per-session spikes in throughput during the tests?
-<p>@@QQA@@
-Packet drops can force individual sessions to sharply reduce their offered
-load momentarily.  
+<p>The jumps in throughput near the beginnings and ends of the tests
+are likely due to streams starting and finishing early.
+The smaller per-session spikes in throughput during the tests require
+a bit more explanation.
+The key point is that both CoDel and FQ-CoDel exert control by dropping
+packets.
+These packet drops can force individual sessions to sharply reduce their
+offered load momentarily, in accordance with
+<a href="http://en.wikipedia.org/wiki/TCP_congestion_avoidance_algorithm">TCP's end-to-end congestion control</a>.
 The sessions recover quickly and sometimes also overshoot when slow-starting,
 resulting in the spikes.
 Note that the overall average throughput, indicated by the black trace,
 does not vary much, so the aggregate bandwidth is quite steady.
-<p>@@QQE@@
 
 <h2><a name="Remaining Challenges">Remaining Challenges</a></h2>
 
@@ -620,8 +636,8 @@ the standard 5-millisecond quantum, while the ADSL modem could use
 a larger quantum matched to the available ADSL bandwidth.
 in time.
 
-<p>Of course, getting FQ-CoDel installed on all hubs, switches, and
-modems will take some time.
+<p>Of course, getting AQM mechanism (such as FQ-CoDel) installed on all
+networking infrastructure will take some time.
 Furthermore, more complex topologies will likely pose additional challenges.
 Then again, nothing is perfect, and we must never allow imagined
 perfection to crowd out real improvement.
