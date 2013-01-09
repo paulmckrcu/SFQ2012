@@ -1,0 +1,55 @@
+* Slow start is not slow
+
+"Furthermore, TCP-based &ldquo;hog&rdquo; sessions begin in slow-start mode,
+thus acting like a low-bandwidth session initially."
+
+Um, no... Slow start is actually "exponential start" and dependent on the initial window. 
+
+http://en.wikipedia.org/wiki/Slow-start
+
+It's worse than congestion avoidance, by far, however, we win because we take care of the early slow start phase inside of "new flows" - perturbing existing other hog sessions more - while we wait for codel's drop scheduler to kick in when (or rather if) it becomes a fat flow 100ms later. 
+
+Also stuff in slow start tends to be bursty as it seeks the RTT. 
+
+Explanation:
+
+So, you send a burst of 4 packets. They exit fast, and don't kick in codel. 2 acks come back doubling the window size.
+8 packets go out, and kick in the codel scheduler, 4 acks come back doubling the window size again, but we drop out of the codel scheduler because the queue empties due to the RTT being longer than the queue size. Now we send out 16 packets, starting codel's drop scheduler at (for the sake of this example) the 6th packet, but even then we don't hit the interval inside of the RTT, so we drop out of the scheduler again when the 16th packet exits. 8 acks come back so we double the segment size again and dump 32 packets into the queue. Now we have a queue, we hit codel's current interval and drop (say) the 22nd packet. The rate increases in response to the first 21 packets sent - but finally The rate drop, the lost packet needs to be resent, and tcp enters the "congestion avoidance" phase.
+
+Codel then taps gently now and then, when needed, to keep the stream under control.
+
+This is why I say that fq_codel works well on "sparse" streams and have avoided "thick and thin and hog" terminology. The behavior of the queues  when empty or nearly so for any period of time resets the current implementation of the codel drop scheduler.
+
+Secondly, most web traffic *never* gets out of slow start. And we try really hard not to shoot stuff in slow start, just shooting the elephants is usually enough. However I HAVE seen slow start misbehave in fq_codel, particularly with it's overlarge default limit at low bandwidths.
+
+Thirdly, we DO enter the old_flows queue rather rapidly in the above example - HOWEVER each first packet inside of the rtt burst generally does enter the new_flows queue. AND when those packets are acks, that's quite a lot of acks that fit into a quantum - the above example is for an upload through a fq_codel queue, a download will ship 20+ acks in each quantum in a flow before switching to the next flow.
+
+This last behavior is why I've written a couple variants of fq_codel and the upcoming "cake", to do better mixing with the predominately ack traffic on a home gateway. A scenario with 6 tcp flows in slow start and 1 game flow perpetually new will perturb the game flow a lot in fq_codel. Typical web traffic has 100+ flows in slow start, 6 active at any time... The saving grace here is that the duration of slow start on web traffic is short and you have only a couple acks per flow to deal with, so it takes a while to fill up a quantum's worth of acks and that only rarely.
+
+It's why also kathie and van are doing a more pure SFQ_codel in their ns2 sim as it's simpler than fq_codel and has much better mixing. Cake is a hybrid of the two ideas that might be worse than either. I have analysis paralysis, or rather I felt it was more important to keep working on decent real-world tests 
+
+fq_codel is reasonably well suited to the server side of the universe but I'd much rather have better mixing at the bandwidths I care about (below 10Mbit) for home gateways.
+
+* Target and interval
+
+Inside a data center at 10GigE speeds, Eric uses target 500us interval 20ms. 
+
+Below 4Mbit I also fiddle with target, setting it to a time setting 1.5x higher than the speed of the slowest packet. Kathie thinks I'm wrong... But not wrong on the mixing issue.
+
+* Quantum
+
+The original of this was extremely confused as to the role of a quantum. I think I've fixed that.
+
+* new_flows behavior
+
+<p>Interestingly enough, if a <code>new_flows</code> flow becomes
+empty, it is also moved to the end of the <code>old_flows</code> list.
+This is extremely important, as it prevents a constant drizzle of
+packets from low-bandwidth sessions from starving the
+<code>old_flows</code> list.
+
+I'm pretty sure this interpretation is wrong. It's just empty. It will automatically become new when hit again.
+
+A constant drizzle of packets from low-bandwidth sessions COULD starve the old_flows list, but it's hard to create an attack this way due to the permutation of the hash. I'm pretty sure though that an attack can be made against it by flooding udp with 64k different port numbers at low rates, say with a hop count of 3...
+
+(And the same attack would be just as effective against pfifo_fast. Probably. )
