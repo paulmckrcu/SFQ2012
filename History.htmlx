@@ -1,0 +1,58 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+        "http://www.w3.org/TR/html4/loose.dtd">
+        <html>
+        <head><title>Beating Bufferbloat - A history</title>
+        <meta HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+
+           <p>January 7, 2013</p>
+           <p>Dave T&umlht"</p>
+
+<h2>Battling Bufferbloat - A history</h2>
+
+<h2> SFB </h2>
+
+<h2> SFQ </h2>
+
+<h3> A core new idea in timestamping packets </h3>
+
+Around january of 2012, the concept of somehow measuring the time spent in queue by packets was widely discussed internet-wide.
+
+Timestamping had been ruled out in the 90s as far too expensive to be actually used in an AQM, but over the past decade multiple means of getting time into packets had been invented and deployed. How expensive was timestamping now, we asked?
+
+And it turned out... <a href="">not very much</a>... about 10ns on modern hardware. A decade's hard work towards making timestamping work well in Linux had paid off unexpectedly. Other OSes, such as BSD, do not have such an enhanced timestamping facility.
+
+Yes, we could do timestamping inside of the network stack, but we didn't know what to do with it. 
+
+Grip on queue duration - good idea. But what to do with that information remained in doubt -
+We still lacked a good drop strategy, and despite much discussion on multiple lists, with Eric, Juliusz Chorbroszwick and others, nobody was able to come up with a strategy that worked. 
+
+Kathie Nichols and Van Jacobson kept at the problem, however. They'd had core insights with "RED in a different light, and now that they knew that timestamping was now cheap, they set to work finding a cheap way to utilize that information against the most common bloat-creating offender, TCP. 
+
+Meanwhile Eric Dumazet and Dave Taht, equipped with the expanded version of <a href="http://www.rdrop.com/users/paulmck/scalability/paper/sfq.2002.06.04.pdf">Paul E.&nbsp;McKenney's seminal SFQ paper</a>, set to work on implementing ideas he'd discarded in the early 1990s as too computationally intensive to implement, with some new twists.
+
+<h3> Expanding SFQ </h3>  
+
+SFQ was, by linux 3.3, an entirely new animal, up from a formerly hard limit of 127 flows, now capable of scaling to 64k buckets, unlimited queue depth, with a permutation facility that didn't perturb flows. Permutation without perturbing flows proved hard on cpu, and increasing queue depth to limits suitable for GigE and higher led to the recurrance of bufferbloat (collapse and retries) on high rate streams like those from video traffic... but it still worked better than anything else they'd tried, so they kept at it.
+
+In Linux 3.4, Eric added support for RED and ARED, with head drop. Now that we had sufficient queue information maintained in RED, head drop became easy. The effect of head drop was pretty impressive in controlling buffering in streams. 
+
+Along the was a bug was found and fixed in the Linux RED implementation, and Eric found a clever way to signal congestion back to a host based tcp flow (rather than a routed one) that changed cwnd without packet loss.
+
+Initial results with SFQRED were very promising. However, sfqred was even more difficult to configure than RED was!
+
+And the "new flows" idea, developed in competition with QFQ, in the earlier versions of SFQRED, was subject to attack and ultimately reverted from the final commit. 
+
+The stage was set for Kathie Nichols and Van Jacobsons Codel, but... simultaneously going on were the other fixes in the stack...
+
+<h2>BQL</h2>
+
+<h2>ADSL</h2>
+
+<h2>Codel</h2>
+
+Kathie Nichols and Van Jacobson had been working on a successor to RED for 14 years.
+
+...
+
+<h2>Fq_codel</h2>
+
