@@ -12,10 +12,10 @@
 <h2>Introduction</h2>
 
 <p><a href="http://lwn.net/Articles/419714/">Bufferbloat</a>
-severely degrades Internet response times, particularly for low-bandwidth
-traffic such as
-<a href="http://en.wikipedia.org/wiki/Voice_over_IP">voice-over-IP (VOIP)</a>
-or web browsing.
+severely degrades Internet response times on the internet edge, particularly for low-bandwidth
+but latency sensitive traffic such as
+<a href="http://en.wikipedia.org/wiki/Voice_over_IP">voice-over-IP (VOIP)</a>,
+gaming, or web browsing.
 Although unintelligible VOIP connections and sluggish web-page loads
 are perhaps the most familiar symptom of bufferbloat,
 it also impedes other important types of traffic, including
@@ -25,7 +25,7 @@ it also impedes other important types of traffic, including
 <a href="http://en.wikipedia.org/wiki/Address_Resolution_Protocol">ARP</a>
 packets, and 
 <a href="http://en.wikipedia.org/wiki/Routing">routing</a> packets.
-Because timely delivery of these packets is critical to Internet
+Because timely delivery of these packets is critical to network
 operation for all types of traffic, bufferbloat affects everyone.
 The Internet is literally drowning in its own buffers.
 
@@ -40,7 +40,7 @@ version 3.5 of the Linux kernel as
 <code>net/sched/sch_codel.c</code>.
 However, in his
 <a href="http://recordings.conf.meetecho.com/Recordings/watch.jsp?recording=IETF84_TSVAREA&amp;chapter=part_3">IETF presentation</a>,
-Van Jacobson recommends the use of FQ-CoDel, which combines
+Van Jacobson recommended the use of FQ-CoDel, which combines
 <a href="http://www.rdrop.com/users/paulmck/scalability/paper/sfq.2002.06.04.pdf">stochastic fairness queueing (SFQ)</a>
 with CoDel:
 
@@ -195,12 +195,9 @@ drops will occur on a schedule computed from an inverse-square-root
 control law until either (1)&nbsp;the queue becomes empty or
 (2)&nbsp;a packet is
 encountered with a sojourn time that is less than the target time.
-This target time, also called the <i>quantum</i>, is normally set
+This target time, is normally set
 to about five milliseconds, and the interval is normally set
 to about 100 milliseconds.
-The goal is for the quantum to be roughly 5% of the round-trip time,
-which, given a typical 100-millisecond round-trip time, affirms the
-choice of five milliseconds.
 This approach has proven to be quite effective in a wide variety
 of situations.
 
@@ -211,33 +208,35 @@ of situations.
 <P>Here time increases from left to right, and the curve gives the
 sojourn time of the packet at the head of the CoDel queue as a function
 of time.
-As you can see, the sojourn time rise significantly above the target,
+As you can see, the sojourn time rises significantly above the target,
 requiring CoDel to react so as to bring the sojourn back below target
 at the right-hand end of the diagram.
 
-<p>As noted earlier, CoDel reacts by dropping packets, and
+<p>As noted earlier, CoDel reacts by dropping or ECN marking packets, and
 the second and subsequent vertical dot-dashed lines correspond to
-single dropped packets.
+single dropped (or marked) packets.
 This means that even during the time that the sojourn time is
 greater than the target time, most packets are being transmitted
 rather than being dropped.
-The reason for this is that it takes on the order of 100 milliseconds
+The reason for this is that it can take on the order of 100 milliseconds
 for the fact of the packet drop to reach the traffic source.
 CoDel's design therefore must allow for this delay, which it does by
 scheduling packet-drops at an interval that is sufficiently large to
-allow the traffic source time to react.
+allow the traffic source time to react. If it is too large, codel
+drops at progressively decreasing intervals of time until a proper
+estimate of RTT is obtained and the flow is brought under control.
 
 <p>However, one drawback of CoDel is that it controls only a single
 queue.
 As a result, packets from low-bandwidth sessions (such as VOIP sessions)
-can be delayed by packets from high-bandwidth sessions such as video
-downloads.
+can be delayed by packets from high-bandwidth sessions such as various
+uploads like dropbox, scp, etc.
 
 <h2><a name="FQ-CoDel Overview">FQ-CoDel Overview</a></h2>
 
 <p>It would be better to allow the low-bandwidth time-sensitive
-VOIP packets to jump ahead of the video download, but not to the extent
-that the video download is in any danger of starvation&mdash;or even in
+VOIP packets to jump ahead of the hogs, but not to the extent
+that the hog stream is in any danger of starvation&mdash;or even in
 danger of significant throughput degradation.
 One way to do this is to combine CoDel with SFQ, resulting in FQ-CoDel.
 This combining requires significant rework of SFQ, but
@@ -306,12 +305,10 @@ Of course, this means that a new &ldquo;hog&rdquo; session will initially
 be misclassified.
 However, a &ldquo;hog&rdquo; session is likely to persist for some time, so the
 fraction of time that it spends misclassified is usually insignificant.
-Furthermore, TCP-based &ldquo;hog&rdquo; sessions begin in slow-start mode,
-thus acting like a low-bandwidth session initially.
 
 <p>A flow on the <code>new_flows</code> list is guaranteed to
 eventually either become empty or exceed the quantum.
-If it exceeds its quantum, it will of course be moved to the
+If it exceeds its quantum, it is moved to the
 end of the <code>old_flows</code> list.
 
 <p><a name="Quick Quiz 5"><b>Quick Quiz 5</b>:</a>
@@ -348,13 +345,21 @@ keep in mind that for many transport protocols (including TCP),
 a dropped packet signals the sender to reduce its offered load.
 Clearly, the faster this signal reaches the sender the better.
 
-<p>But if we drop from the tail of a long queue, this signal must
+Similarly, with VOIP, the contents of a single dropped packet is 
+easily extrapolated against the previous and successor packets.
+Holding delays and jitter in VOIP below 10ms in the general case
+is very useful.
+
+<p>If we drop from the tail of a long queue, this signal must
 propagate through the queue as well as traversing the network to
 the receiver and then (via some sort of acknowledgement) back to
-the sender.
+the sender. Furthermore, with a naive tail drop strategy, TCP
+global synchronization can occur.
+
 In contrast, if we drop from the head of a long queue, the signal
 need not propagate through the queue itself, but needs only traverse
 the network.
+
 This faster propagation enables the transport protocols to more
 quickly adjust their offered load, resulting in faster reduction in
 queue length, which in turn results in faster reduction in network
@@ -364,10 +369,9 @@ as illustrated in the following diagram.
 <p><img src="headtaildrop.png" width="35%" alt="headtaildrop.png">
 
 <p>In addition, dropping from the head instead of the tail means that
-older packets are preferentially dropped,
-which is helpful in cases where faster
-propagation of newer information is more important than slower
-propagation of older information.
+older packets are preferentially dropped, which is helpful in cases 
+where faster propagation of newer information is more important than 
+slower propagation of older information.
 
 <p>Another difference between SFQ and FQ-CoDel is that the array on
 the left-hand side of the diagram is simply an
@@ -390,25 +394,24 @@ guarantee that all operations be O(1).
 <p>Instead, for FQ-CoDel, the left-hand array has one entry per bucket,
 where each entry contains the current count of bytes for the corresponding
 bucket.
-When it is necessary to drop a packet due to packet overlimit conditions,
+
+When it is necessary to drop a packet due to filling the queue completely,
 FQ-CoDel scans this array looking for the largest entry.
 Because the array has only 1024 entries comprising 4096 contiguous bytes,
 the caches of modern microprocessors make short work of scanning this
 array.
+
 Yes, there is some overhead, but then again one of the strengths of
-CoDel is that packet drops are normally reasonably infrequent.
+CoDel is that it manages the queue length dynamically - overrunning 
+the size of the queue is reasonably infrequent.
 
 <p>Finally, FQ-CoDel does not perturb the hash function at runtime.
 Instead, a hash function is selected randomly from a set of about 4 billion
-possible hash functions at boot time.
+possible hash functions when the qdisc is initialized on an interface.
 
-<p>The overall effect is that FQ-CoDel gives users a choice between
-low latency and high reliability on the one hand and high bandwidth
-on the other.
-Low-bandwidth sessions with high probability enjoy low latency and low
-packet-drop rates (thus high reliabilty), while &ldquo;hog&rdquo;
-sessions incur increased latency and higher packet-drop rates in exchange
-for greater bandwidth.
+<p>The overall effect is that FQ-CoDel delivers low latency and high reliability 
+on the one hand and high bandwidth - with an accurate and appropriate to the 
+available bandwidth queue length - on the other.
 
 <p><a name="Quick Quiz 6"><b>Quick Quiz 6</b>:</a>
 But is FQ-CoDel fair?
@@ -444,7 +447,7 @@ What if my network driver does not yet have the needed calls to
 An excellent
 <a href="http://wiki.openwrt.org/doc/howto/packet.scheduler/packet.scheduler">howto</a>
 is available on the OpenWRT web site, which you should read carefully.
-That said, if &ldquo;<code>tc qdisc show dev eth0</code>&rdquo; does not show
+That said, if &ldquo;<code>tc -s qdisc show dev eth0</code>&rdquo; does not show
 <code>fq_codel</code>
 in its output, you do not have FQ-CoDel properly configured for
 <code>eth0</code>.
@@ -701,7 +704,7 @@ Wouldn't that be needlessly inflicting dropouts on the hapless VOIP users?
 
 </p><p><b>Answer</b>:
 Indeed it might.
-However, given that FQ-CoDel uses no fewer than 1024 hash buckets,
+However, given that FQ-CoDel by default uses no fewer than 1024 hash buckets,
 the probabilty that (say) 100 VOIP sessions will all hash to the
 same bucket is something like ten to the power of minus 300.
 Thus, the probability that at least one of the VOIP sessions will hash
@@ -751,7 +754,7 @@ Of course, the probability of excessive collisions between &ldquo;hog&rdquo;
 sessions is just as low as that for VOIP sessions.
 
 <p>Nevertheless, SFQ addresses this by allowing the hash function to be
-periodically perturbed, and providing a similar perturbation capability
+periodically perturbed. Providing a similar perturbation capability
 for FQ-CoDel is ongoing work.
 
 
