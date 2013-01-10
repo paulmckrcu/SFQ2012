@@ -5,7 +5,8 @@
         <meta HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
 
            <p>January 7, 2013</p>
-           <p>As told to Paul E.&nbsp;McKenney by the bufferbloat list.</p>
+           <p>As told to Paul E.&nbsp;McKenney and Dave T&auml;ht
+	   by the bufferbloat list.</p>
 
 <h2>Introduction</h2>
 
@@ -219,9 +220,11 @@ As you can see, the sojourn time rises significantly above the target,
 requiring CoDel to react so as to bring the sojourn back below target
 at the right-hand end of the diagram.
 
-<p>As noted earlier, CoDel reacts by dropping or ECN marking packets, and
+<p>As noted earlier, CoDel reacts by dropping or
+<a href="http://en.wikipedia.org/wiki/Explicit_Congestion_Notification">ECN-marking</a>
+packets, and
 the second and subsequent vertical dot-dashed lines correspond to
-single dropped (or marked) packets.
+single dropped (or ECN-marked) packets.
 This means that even during the time that the sojourn time is
 greater than the target time, most packets are being transmitted
 rather than being dropped.
@@ -229,15 +232,17 @@ The reason for this is that it can take on the order of 100 milliseconds
 for the fact of the packet drop to reach the traffic source.
 CoDel's design therefore must allow for this delay, which it does by
 scheduling packet-drops at an interval that is sufficiently large to
-allow the traffic source time to react. If it is too large, codel
-drops at progressively decreasing intervals of time until a proper
-estimate of RTT is obtained and the flow is brought under control.
+allow the traffic source time to react.
+If the sojourn time remains above the target for an extended time period,
+CoDel drops at progressively decreasing intervals of time until a proper
+estimate of the round-trip time is obtained and the flow is brought under
+control.
 
 <p>However, one drawback of CoDel is that it controls only a single
 queue.
 As a result, packets from low-bandwidth sessions (such as VOIP sessions)
-can be delayed by packets from high-bandwidth sessions such as various
-uploads like dropbox, scp, etc.
+can be delayed by packets from high-bandwidth upload sessions, for example,
+to dropbox or the <code>scp</code> command.
 
 <h2><a name="FQ-CoDel Overview">FQ-CoDel Overview</a></h2>
 
@@ -413,10 +418,10 @@ keep in mind that for many transport protocols (including TCP),
 a dropped packet signals the sender to reduce its offered load.
 Clearly, the faster this signal reaches the sender the better.
 
-Similarly, with VOIP, the contents of a single dropped packet is 
-easily extrapolated against the previous and successor packets.
-Holding delays and jitter in VOIP below 10ms in the general case
-is very useful.
+<p>Similarly, with VOIP, the contents of a single dropped packet is 
+easily extrapolated given the previous and subsequent packets.
+In general, it is more important to maintain VOIP delay and jitter below
+10 milliseconds than it is to guarantee 100% reliable VOIP packet delivery.
 
 <p>If we drop from the tail of a long queue, this signal must
 propagate through the queue as well as traversing the network to
@@ -424,11 +429,11 @@ the receiver and then (via some sort of acknowledgement) back to
 the sender. Furthermore, with a naive tail drop strategy, TCP
 global synchronization can occur.
 
-In contrast, if we drop from the head of a long queue, the signal
+<p>In contrast, if we drop from the head of a long queue, the signal
 need not propagate through the queue itself, but needs only traverse
 the network.
 
-This faster propagation enables the transport protocols to more
+<p>This faster propagation enables the transport protocols to more
 quickly adjust their offered load, resulting in faster reduction in
 queue length, which in turn results in faster reduction in network
 round-trip time, which finally improves overall network responsiveness,
@@ -463,23 +468,26 @@ guarantee that all operations be O(1).
 where each entry contains the current count of bytes for the corresponding
 bucket.
 
-When it is necessary to drop a packet due to filling the queue completely,
+<p>When it is necessary to drop a packet due to filling the queue completely,
 FQ-CoDel scans this array looking for the largest entry.
 Because the array has only 1024 entries comprising 4096 contiguous bytes,
 the caches of modern microprocessors make short work of scanning this
 array.
 
-Yes, there is some overhead, but then again one of the strengths of
-CoDel is that it manages the queue length dynamically - overrunning 
+<p>Yes, there is some overhead, but then again one of the strengths of
+CoDel is that it manages the queue length dynamically&mdash;overrunning 
 the size of the queue is reasonably infrequent.
 
 <p>Finally, FQ-CoDel does not perturb the hash function at runtime.
 Instead, a hash function is selected randomly from a set of about 4 billion
-possible hash functions when the qdisc is initialized on an interface.
+possible hash functions when the queue discipline is initialized on a given
+interface.
 
-<p>The overall effect is that FQ-CoDel delivers low latency and high reliability 
-on the one hand and high bandwidth - with an accurate and appropriate to the 
-available bandwidth queue length - on the other.
+<p>The overall effect is that FQ-CoDel delivers low latency and
+high reliability 
+on the one hand and high bandwidth&mdash;
+with a queue length accurately computed for the available
+bandwidth&mdash;on the other.
 
 <p>@@QQ@@
 But is FQ-CoDel fair?
