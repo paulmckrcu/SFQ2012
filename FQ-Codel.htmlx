@@ -619,7 +619,7 @@ distinguishing between low-bandwidth and &ldquo;hog&rdquo; sessions.
 This problem might be addressed by reducing the
 <a href="http://en.wikipedia.org/wiki/Maximum_transmission_unit">MTU</a>
 or by increasing FQ-CoDel's quantum to (say) 30&nbsp;milliseconds,
-for example, by using the <code>target/code> argument to the
+for example, by using the <code>target</code> argument to the
 <code>fq_codel</code> discipline
 (see <a href="http://git.coverfire.com/?p=linux-qos-scripts.git;a=blob;f=src-3tos.sh;hb=HEAD">Dan Siemon's script</a>
 for sample usage).
@@ -736,6 +736,18 @@ At some point, bigger pipes are required.
 
 <p>Again, FQ-CoDel is an important weapon in the fight against
 bufferbloat, and I very much look forward to its rapid deployment!
+
+<h3>To Probe Further</h3>
+
+<ol>
+<li>	<a href="http://gettys.wordpress.com/category/bufferbloat/">Jim Gettys's blog</a>
+<li>	<a href="http://www.bufferbloat.net/projects/cerowrt">CeroWrt (OpenWRT-based project addressing bufferbloat)</a>
+<li>	<a href="http://www.bufferbloat.net/projects/codel/wiki/Wiki">CoDel wiki</a>
+<li>	<a href="http://www.bufferbloat.net/projects/codel/wiki/Best_Practices_for_Benchmarking_CoDel_and_FQ_CoDel">Best Practices for Benchmarking CoDel and FQ-CoDel</a>
+<li>	<a href="http://akira.ruc.dk/~tohojo/bufferbloat/bufferbloat-final.pdf">Battling Bufferbloat: An experimental comparison of four approaches to queue management in Linux</a>
+	by Toke H&oslash;iland-J&oslash;rgensen (Master module project for
+	Roskilde University).
+</ol>
 
 <h1><a name="Acknowledgments">Acknowledgments</a></h1>
 
